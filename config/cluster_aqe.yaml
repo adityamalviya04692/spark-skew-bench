@@ -1,0 +1,40 @@
+# Cluster grid, part 2 of 2: does the AQE null survive at cluster scale?
+#
+# The single-node result was a null: AQE returned 0.91x / 1.01x / 1.02x against
+# measurement floors of 18.3% / 0.1% / 6.5%, and the paired coalescing-disabled
+# control showed that what little AQE did return was partition coalescing, not
+# skew handling. The obvious objection is that the null was an artefact of
+# scale -- that OptimizeSkewedJoin never fired because the hot partition was
+# only 11.41 MB against a 16 MB advisory size, so the rule had nothing to split.
+#
+# At this scale that objection is closed by construction. With 60M fact rows,
+# theta = 1.2 and 2000 engines the hot key carries 22.23% of the rows, so the
+# hot partition is roughly 1.3-2.4 GB. That clears all three of the rule's
+# conjunctive preconditions with orders of magnitude to spare: it exceeds the
+# 256 MB skewedPartitionThresholdInBytes, it exceeds 5x the median partition,
+# and it exceeds the 64 MB advisory size. If AQE is going to help a skewed
+# join, it has every reason to help here. A null under these conditions is a
+# result about the mechanism, not about the fixture.
+#
+# Two workloads only -- the thin and thick ends of the probe sweep. The middle
+# of the sweep is a salting question, and the salting file already covers it.
+# The baseline arm is repeated inside this file on purpose, so every AQE ratio
+# reported from it is measured against a baseline from the same Spark session.
+#
+# 2 workloads x 3 profiles x 3 arm-k cells = 18 cells.
+repetitions: 5
+warmup: 1
+
+workloads:
+  - {n_fact: 60000000, n_dim: 600000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 1,   hot_keys: 1, n_sensors: 21, seed: 20260818}
+  - {n_fact: 60000000, n_dim: 600000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 100, hot_keys: 1, n_sensors: 21, seed: 20260818}
+
+spark:
+  - {master: "databricks", driver_memory: "8g", shuffle_partitions: 200, aqe_enabled: false, autobroadcast_threshold: -1, advisory_partition_size: "64MB", skewed_partition_threshold: "256MB", skewed_partition_factor: 5}
+  - {master: "databricks", driver_memory: "8g", shuffle_partitions: 200, aqe_enabled: true,  autobroadcast_threshold: -1, advisory_partition_size: "64MB", skewed_partition_threshold: "256MB", skewed_partition_factor: 5, aqe_coalesce_enabled: true}
+  - {master: "databricks", driver_memory: "8g", shuffle_partitions: 200, aqe_enabled: true,  autobroadcast_threshold: -1, advisory_partition_size: "64MB", skewed_partition_threshold: "256MB", skewed_partition_factor: 5, aqe_coalesce_enabled: false}
+
+arms:
+  - {name: baseline, k: [1]}
+  - {name: aqe,      k: [1]}
+  - {name: aqe_salt, k: [8]}

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skewbench"
+version = "1.0.0"
+description = "A reproducible benchmark for Spark skewed-join mitigation: AQE vs. salting, with a salt-cardinality cost model"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "Aditya Malviya"}]
+keywords = ["apache-spark", "data-skew", "adaptive-query-execution", "salting", "benchmark", "lakehouse"]
+dependencies = [
+    "numpy>=1.26", "pandas>=2.0", "pyarrow>=14.0",
+    "matplotlib>=3.8", "scipy>=1.11", "PyYAML>=6.0",
+]
+
+[project.scripts]
+skewbench = "skewbench.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

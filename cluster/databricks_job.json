@@ -1,0 +1,67 @@
+{
+  "name": "skewbench-cluster-validation",
+  "tasks": [
+    {
+      "task_key": "skewbench",
+      "spark_python_task": {
+        "python_file": "/Workspace/Users/REPLACE_WITH_YOUR_EMAIL/spark-skew-bench/cluster/run_cluster.py",
+        "parameters": [
+          "--config",
+          "/Workspace/Users/REPLACE_WITH_YOUR_EMAIL/spark-skew-bench/config/cluster_salt.yaml",
+          "--data-root",
+          "/Volumes/skewbench_ws/default/skewbench/data",
+          "--out",
+          "/Volumes/skewbench_ws/default/skewbench/cluster_salt.jsonl"
+        ]
+      },
+      "new_cluster": {
+        "spark_version": "16.4.x-scala2.12",
+        "node_type_id": "Standard_D4ds_v5",
+        "driver_node_type_id": "Standard_D4ds_v5",
+        "num_workers": 4,
+        "runtime_engine": "STANDARD",
+        "autotermination_minutes": 20,
+        "spark_conf": {
+          "spark.sql.adaptive.enabled": "false"
+        },
+        "cluster_log_conf": {
+          "volumes": {
+            "destination": "/Volumes/skewbench_ws/default/skewbench/logs"
+          }
+        },
+        "custom_tags": {
+          "purpose": "skewbench-research"
+        }
+      },
+      "libraries": [
+        {
+          "pypi": {
+            "package": "PyYAML>=6.0"
+          }
+        }
+      ]
+    }
+  ],
+  "_notes": [
+    "spark_version 16.4.x-scala2.12 is the newest LTS carrying Spark 3.5.x (3.5.2).",
+    "The UI default is now a Spark 4.x runtime, which would not be comparable to",
+    "the single-node results. This must be set explicitly.",
+    "",
+    "runtime_engine STANDARD disables Photon. Photon is ON by default from DBR",
+    "9.1 upward; it changes the execution engine and would invalidate the",
+    "comparison, and roughly doubles the DBU rate.",
+    "",
+    "cluster_log_conf uses a Unity Catalog volume. DBFS root is deprecated and",
+    "new workspaces are provisioned without it. Log delivery must be configured",
+    "BEFORE the cluster starts -- it cannot be retrofitted to a finished run.",
+    "",
+    "node_type_id Standard_D4ds_v5 = 4 vCPU. 5 nodes = 20 vCPUs, which is a",
+    "smaller quota ask than 8-core nodes. If the DDSv5 family is quota-blocked",
+    "on a new subscription, fall back to Standard_DS3_v2 (standardDSv2Family is",
+    "more reliably pre-enabled).",
+    "",
+    "autotermination_minutes 20 is a cost guard. Set it explicitly; the default",
+    "is not documented. Terminate manually when the run finishes, but wait ~5",
+    "minutes first so log delivery flushes."
+  ]
+}

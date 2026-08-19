@@ -1,0 +1,125 @@
+\section{A Cost Model for Salt Cardinality}
+\label{sec:costmodel}
+
+\subsection{Formulation}
+
+Under selective salting with cardinality $k$, total stage time decomposes into
+three parts.
+
+\emph{The critical task.} The hot key's $H$ rows are spread over $k$
+sub-partitions, so the heaviest task processes approximately $H/k$ rows. Write
+$a$ for the marginal cost of a row on the critical path.
+
+\emph{Replication.} The $P$ matching probe-side rows are emitted $k$ times
+instead of once, adding $P(k-1)$ rows to shuffle, sort and merge. Write $b$ for
+the marginal cost of a replicated row.
+
+\emph{Everything else.} Scanning both inputs, joining the cold keys, and the
+terminal aggregation are all independent of $k$. Collect them into $c$.
+
+\begin{equation}
+T(k) \;=\; a\,\frac{H}{k} \;+\; b\,P\,(k-1) \;+\; c ,
+\qquad k \ge 1 .
+\label{eq:model}
+\end{equation}
+
+\subsection{The optimum}
+
+$T$ is the sum of a convex decreasing term and a linear increasing term, hence
+strictly convex on $k>0$, with a unique interior minimum. Differentiating,
+
+\begin{equation}
+\frac{dT}{dk} \;=\; -\frac{aH}{k^{2}} \;+\; bP \;=\; 0
+\qquad\Longrightarrow\qquad
+\boxed{\;k^{*} \;=\; \sqrt{\frac{aH}{bP}} \;=\; \sqrt{\gamma\,\frac{H}{P}}\;}
+\label{eq:kstar}
+\end{equation}
+
+where $\gamma = a/b$ is the ratio of the two marginal costs. Four properties of
+Equation~\eqref{eq:kstar} are worth drawing out.
+
+First, \textbf{it depends on the workload only through $H/P$}, the ratio of
+hot-key rows on the two sides. That ratio is cheap to estimate and is exactly
+what a frequency sketch on the join key already yields.
+
+Second, \textbf{$\gamma$ ought to be a property of the engine and the hardware
+rather than of the query}: row-processing cost on the critical path and
+replicated-row shuffle cost both scale with the machine, so their ratio should
+be more stable than either alone, and one calibration should serve many
+workloads. We state this as a hypothesis rather than a result because our own
+measurements do not support it --- see Section~\ref{sec:results}, where fitted
+$\gamma$ varies by \GammaSpread$\times$ across three workloads on one machine.
+That instability is diagnostic of the fits being dominated by the $k=1$ to
+$k=2$ step rather than by the replication term, and it is the second reason,
+alongside the unresolved convexity, that we do not claim the closed form is
+validated.
+
+Third, \textbf{$k^{*}$ falls as $1/\sqrt{P}$}. Thickening the probe side's hot
+key makes every additional salt value more expensive while leaving straggler
+relief unchanged, so the optimum retreats. This is the model's sharpest
+falsifiable prediction, and Section~\ref{sec:results} tests it directly by
+sweeping $\mu$ over a factor of 32.
+
+Fourth, and least intuitively, \textbf{$k^{*}$ grows only as the square root of
+the skew}. Doubling the hot key's dominance does not double the salt
+cardinality; it multiplies it by $\sqrt{2}$. This is the structural reason
+aggressive salting is so often counterproductive: intuition says respond to
+severe skew with large $k$, and the mathematics says respond with a modestly
+larger one.
+
+\subsection{Two ceilings}
+
+Equation~\eqref{eq:kstar} is unconstrained, and taken literally it will
+sometimes recommend a $k$ that buys nothing at all.
+
+\subsubsection{Saturation}
+Once the hot partition has been divided below the size of an ordinary
+partition, the hot task stops being the straggler --- some other partition now
+finishes last --- and further division relieves nothing while continuing to pay
+replication. From Equation~\eqref{eq:rho}, that point is
+\begin{equation}
+k_{\text{sat}} \;=\; \rho \;=\; \frac{H}{N/p} .
+\end{equation}
+\textbf{Salting beyond $\rho$ is always waste.} The bound is immediate from the
+model, requires no calibration, and we have not found it stated in the
+practitioner literature.
+
+\subsubsection{Parallelism}
+Sub-partitions beyond the number of concurrently schedulable task slots $C$
+queue rather than overlap, so the straggler term stops falling at $k=C$ while
+the replication term keeps rising:
+\begin{equation}
+k_{\text{par}} \;=\; C .
+\end{equation}
+
+\subsubsection{The operational rule}
+\begin{equation}
+k_{\text{eff}} \;=\; \max\Bigl(1,\;\bigl\lfloor \min(k^{*},\,\rho,\,C) \bigr\rceil\Bigr) .
+\label{eq:keff}
+\end{equation}
+
+Which of the three binds is itself diagnostic. If $k^{*}$ binds, the workload
+is replication-limited and the probe side is the thing to shrink. If $\rho$
+binds, the skew is mild relative to the partition count and raising $p$ would
+serve better than salting. If $C$ binds, the cluster is the limit and salting
+further is pure overhead --- the common case on small clusters, and the one in
+which tutorial defaults do the most damage.
+
+\subsection{Uniform salting}
+
+For uniform salting the replication term scales with the whole probe table, so
+Equation~\eqref{eq:model} becomes $T_{u}(k) = aH/k + bM(k-1) + c$ and
+$k_{u}^{*} = \sqrt{\gamma H/M}$. Since $M \gg P$, the optimum is
+correspondingly smaller --- often below $2$, meaning uniform salting is
+frequently not worth doing at all. This falls out of the model rather than
+having to be discovered empirically, and it is a good illustration of why
+pricing the technique is worth the trouble.
+
+\subsection{Calibration}
+
+Given measurements $\{(k_i, T_i)\}$, Equation~\eqref{eq:model} is \emph{linear}
+in $(a,b,c)$ under the basis $[H/k,\; P(k-1),\; 1]$. Fitting is therefore
+ordinary linear least squares: no initial guess, no local minima, no optimiser
+hyperparameters, and a fit that is a deterministic function of the
+measurements. Three distinct values of $k$ suffice to identify three
+coefficients; we use seven.

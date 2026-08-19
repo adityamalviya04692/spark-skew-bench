@@ -1,0 +1,29 @@
+# Extended grid: exercises the axes the pilot fixed.
+#   - theta sweep, including theta=0 as a no-skew control
+#   - multi-hot-key (hot_keys > 1), previously unexercised
+#   - real NASA C-MAPSS payloads alongside synthetic ones
+repetitions: 3
+warmup: 1
+
+workloads:
+  # --- theta sweep, one-sided probe held at mult=10 ---
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 0.0, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 12, seed: 20260818}
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 0.5, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 12, seed: 20260818}
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 0.9, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 12, seed: 20260818}
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.5, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 12, seed: 20260818}
+  # --- multi-hot-key ---
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 10, hot_keys: 10,  n_sensors: 12, seed: 20260818}
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 10, hot_keys: 100, n_sensors: 12, seed: 20260818}
+  # --- real C-MAPSS payloads (FD004: 249 units, the largest subset) ---
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 249, theta: 1.2, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 21, source: cmapss, cmapss_subset: FD004, seed: 20260818}
+
+spark:
+  - {master: "local[2]", driver_memory: "4g", shuffle_partitions: 16, aqe_enabled: false, autobroadcast_threshold: -1, skewed_partition_threshold: "8MB", skewed_partition_factor: 5, advisory_partition_size: "1MB"}
+  - {master: "local[2]", driver_memory: "4g", shuffle_partitions: 16, aqe_enabled: true,  autobroadcast_threshold: -1, skewed_partition_threshold: "8MB", skewed_partition_factor: 5, advisory_partition_size: "1MB"}
+
+arms:
+  - {name: baseline,       k: [1]}
+  - {name: aqe,            k: [1]}
+  - {name: salt_selective, k: [1, 2, 4, 8, 16, 32]}
+  - {name: salt_uniform,   k: [8]}
+  - {name: aqe_salt,       k: [8]}

@@ -1,0 +1,111 @@
+\section{The Decision Procedure}
+\label{sec:decision}
+
+Section~\ref{sec:costmodel} answers ``how much salt.'' The prior question is
+whether to salt at all, given that AQE may already handle the case. The
+procedure in Algorithm~\ref{alg:decide} answers both, from statistics available
+before execution.
+
+\begin{algorithm}[t]
+\caption{Skew mitigation decision procedure. Branch structure and thresholds
+are a direct transcription of \texttt{costmodel.decide} and
+\texttt{costmodel.recommend\_k} in the released artifact.}
+\label{alg:decide}
+\begin{algorithmic}[1]
+\REQUIRE $H$, $P$, $N$, $M$, $n$, row width $w$, partitions $p$, slots $C$;
+         AQE parameters $\beta$ (threshold), $\phi$ (factor), $\alpha$
+         (advisory size); optional calibrated $\gamma$
+\ENSURE  a strategy, and a salt cardinality where one is required
+\STATE $\rho \leftarrow H p / N$
+\IF{$\rho < \rho_{\min}$}
+    \RETURN \textsc{DoNothing} \COMMENT{no straggler exists}
+\ENDIF
+\STATE $B_{\text{hot}} \leftarrow H w$;\quad
+       $B_{\text{med}} \leftarrow (N-H)\,w/(p-1)$;\quad
+       $\Theta \leftarrow \max(\beta,\ \phi B_{\text{med}})$
+\IF{$B_{\text{hot}} \le \alpha$}
+    \RETURN \textsc{Salt} \COMMENT{no split possible; the rule is a no-op}
+\ENDIF
+\IF{$B_{\text{hot}} \le \Theta$}
+    \RETURN \textsc{Salt} \COMMENT{AQE will not classify the partition as skewed}
+\ENDIF
+\STATE $\mu \leftarrow P n / M$
+\IF{$\mu \le \mu_{\min}$}
+    \RETURN \textsc{AqeOnly}
+\ELSE
+    \RETURN \textsc{Aqe}$+$\textsc{Salt}
+\ENDIF
+\medskip
+\STATE \textbf{if a salt cardinality is required:}
+\IF{$\gamma$ is calibrated \textbf{and} the fit is identified}
+    \STATE $k^{*} \leftarrow \sqrt{\gamma H / P}$
+\ELSE
+    \STATE $k^{*} \leftarrow \textsc{Undefined}$ \COMMENT{omit from the minimum}
+\ENDIF
+\RETURN $k_{\text{eff}} \leftarrow \max\bigl(1, \lfloor\min(k^{*}, \rho, C)\rceil\bigr)$
+\end{algorithmic}
+\end{algorithm}
+
+The procedure has three branches, and each corresponds to a distinct failure or
+success mode.
+
+\subsection{Branch 1: no straggler}
+When $\rho < \rho_{\min}$ (we use $\rho_{\min}=2$) the hot key amounts to less
+than a couple of ordinary partitions. There is nothing to relieve, and both
+mechanisms would add overhead for no gain. This branch exists because
+practitioners routinely salt joins that were never skewed enough to matter,
+having diagnosed ``skew'' from a slow job rather than from the key
+distribution.
+
+\subsection{Branch 2: AQE will not fire}
+AQE's rule is conjunctive in \emph{three} conditions, not the two that are
+usually discussed. The partition must exceed an absolute byte threshold, a
+multiple of the median, \emph{and} the advisory partition size --- because that
+last is the size the rule splits into, so a hot partition smaller than it
+cannot be divided at all and the optimisation is a no-op however skewed it is.
+Section~\ref{sec:results} finds this third condition to be the binding one in
+practice, and it is the one practitioners do not tune. A join can be badly skewed in the sense
+that matters --- one task running many times longer than its peers --- while
+sitting below the absolute threshold, whose default is large. In that regime
+AQE does nothing at all, silently, and the practitioner who has enabled it
+believes the problem is handled. The remedy is either to salt explicitly or to
+lower the threshold; the procedure reports which, rather than leaving the user
+to discover the non-event from the Spark UI.
+
+\subsection{Branch 3: the one-sided/two-sided hinge}
+This is the substantive branch. When skew is one-sided, splitting the fact-side
+partition and replicating the small matching probe-side partition to each split
+is close to free, and AQE resolves the straggler. When both sides carry the
+same hot key, each of the $s$ splits inherits a large partner. Probe-side work
+grows with $s$, and what looked like $s$-fold relief on the critical path is
+substantially cancelled.
+
+Detecting which case obtains is cheap, and it is exactly
+Equation~\eqref{eq:mu}: compare $P$ against the probe side's mean rows per key.
+We use $\mu_{\min}=2$ throughout, in the
+text and in the implementation. This is a single group-by on a sample, and it is the
+highest-value statistic a practitioner can collect before deciding how to fix a
+slow join --- it selects the mechanism \emph{and}, through
+Equation~\eqref{eq:kstar}, sets its parameter.
+
+\subsection{Worked example}
+
+Take the configuration measured in Section~\ref{sec:results}: $N=\NFACT$ rows,
+$p=\NPART$, $H\approx\HHOT$ rows, $P\approx\PHOT$ rows.
+
+The procedure needs the size of the hot shuffle partition, and here the
+analytical estimate and the measurement disagree in a way worth stating.
+Estimating $B_{\text{hot}} = Hw$ gives \HOTMB~MB; the event log records the
+largest join-stage shuffle partition at \MeasHotMB~MB. The estimate is low
+because the hot partition also absorbs whatever cold keys hash to it. In the
+other direction, $B_{\text{med}}$ estimates the median at \THRESHMB~MB against
+a measured \MeasMedMB~MB, because it ignores variance among the cold
+partitions. $Hw$ and $(N-H)w/(p-1)$ are therefore best read as a lower and an
+upper bound respectively, and where an event log is available the measured
+sizes should be used instead --- as they are in Section~\ref{sec:results}.
+
+Evaluated on the measured sizes, with $\rho=\RHOVAL$ a straggler exists; the
+hot partition clears both documented trigger conditions; and it is nonetheless
+smaller than the advisory split size, so the procedure returns \textsc{Salt}
+with the reason that no split is possible. Section~\ref{sec:results} reports
+what Spark actually did.

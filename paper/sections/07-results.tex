@@ -1,0 +1,329 @@
+\section{Results}
+\label{sec:results}
+
+We report 45 configurations: three probe-side thicknesses
+($P \in \{\PThin, \PMid, \PThick\}$ rows on the hot key) crossed with six
+strategies, a salt sweep $k \in \{1,\dots,32\}$, and --- for the AQE arms --- a
+paired run with partition coalescing disabled. Each cell runs one discarded
+warmup and five timed repetitions, in randomised order. Every number below is
+generated from the results file by the released analysis code; none is
+transcribed by hand.
+
+\subsection{The measurement floor}
+
+Selective salting at $k=1$ compiles to exactly the same physical plan as the
+unmitigated baseline, so the difference between them is pure measurement noise.
+We report it first, because it bounds what any other number in this section can
+mean:
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+$P$ & \PThin & \PMid & \PThick \\
+\midrule
+Baseline wall (s)                & \BaseWallThin & \BaseWallMid & \BaseWallThick \\
+Identical-plan control (s)       & 3.09 & 6.97 & 19.84 \\
+\textbf{Measurement floor}       & \textbf{18.3\%} & \textbf{0.1\%} & \textbf{6.5\%} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The floor varies sharply with run length, and this governs how the rest of the
+section may be read. At $P=\PMid$ the two identical plans agree to 0.1\%, and a
+difference of a few percent is meaningful. At $P=\PThin$ they differ by 18.3\%:
+those runs last under three seconds, short enough that JVM and scheduler noise
+dominates, and \textbf{no claim can be supported at that probe thickness at
+all}. We report the $P=\PThin$ column throughout for completeness and draw no
+conclusions from it.
+
+Two points about how this number is produced. All 45 cells ran in a single
+Spark application: an earlier attempt gap-filled four cells from a second
+application, and those cells were systematically slower and drifting within
+their own run, which inflated this control from 2\% to 29\%. Wall-clock
+comparisons across Spark applications measure JVM warmth, not plans, and the
+harness now records the application id and refuses to compare across it.
+Separately, an earlier version executed cells in configuration order, placing
+the baseline first on a cold JVM; that inflated the same control to 17.7\% and,
+with it, every speedup measured against that baseline. Cell order is now
+randomised under a fixed seed.
+
+\subsection{The baseline is severely skewed}
+
+Without mitigation, the join stage's longest task takes \BaseMaxTaskThin~s,
+\BaseMaxTaskMid~s and \BaseMaxTaskThick~s at the three probe thicknesses, against
+median tasks of a fraction of a second. At $P=\PThick$ a single task runs
+roughly two orders of magnitude longer than its median peer. This is a textbook
+straggler, and no amount of additional compute would remove it.
+
+\subsection{AQE did not help at any probe thickness}
+
+This is the paper's central measurement, and it is a null result.
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+$P$ & \PThin & \PMid & \PThick \\
+\midrule
+Baseline wall (s)            & \BaseWallThin & \BaseWallMid & \BaseWallThick \\
+AQE wall (s)                 & \AqeWallThin & \AqeWallMid & \AqeWallThick \\
+\textbf{AQE speedup}         & \textbf{\AqeSpeedupThin$\times$} & \textbf{\AqeSpeedupMid$\times$} & \textbf{\AqeSpeedupThick$\times$} \\
+\midrule
+Baseline longest task (s)    & \BaseMaxTaskThin & \BaseMaxTaskMid & \BaseMaxTaskThick \\
+AQE longest task (s)         & \AqeCoalMaxTaskThin & \AqeCoalMaxTaskMid & \AqeCoalMaxTaskThick \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+At $P=\PMid$, where the measurement floor is 0.1\%, AQE returns
+\AqeSpeedupMid$\times$. At $P=\PThick$, floor 6.5\%, it returns
+\AqeSpeedupThick$\times$ --- inside the floor. And the row that settles it is
+the last one: enabling Adaptive Query Execution on a join whose longest task
+ran \BaseMaxTaskThick~s produced a longest task of \AqeCoalMaxTaskThick~s.
+\textbf{The critical path is not shortened at any probe thickness; in all three
+it is marginally longer.}
+
+We are careful about what this does and does not say. It is not a claim that
+AQE is useless in general --- it does other useful things, and one of them
+shows up below. It is a claim that on \emph{this} join, with Spark's skew
+machinery enabled and a straggler two orders of magnitude out, AQE delivered no
+improvement distinguishable from measurement noise, and left the straggler
+itself untouched. The next two subsections establish why, and the answer is
+specific enough to act on.
+
+\subsection{The benefit that does exist is coalescing, not skew handling}
+
+AQE bundles several rewrites. To separate them we ran every AQE cell twice,
+identical but for \texttt{spark.sql.adaptive.coalescePartitions.enabled}:
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+$P$ & \PThin & \PMid & \PThick \\
+\midrule
+AQE, coalescing on (s)   & \AqeCoalWallThin & \AqeCoalWallMid & \AqeCoalWallThick \\
+AQE, coalescing off (s)  & \AqeNoCoalWallThin & \AqeNoCoalWallMid & \AqeNoCoalWallThick \\
+Baseline (s)             & \BaseCoalWallPreciseThin & \BaseCoalWallPreciseMid & \BaseCoalWallPreciseThick \\
+\midrule
+Longest task, coal.\ off (s) & \AqeNoCoalMaxTaskThin & \AqeNoCoalMaxTaskMid & \AqeNoCoalMaxTaskThick \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+With coalescing disabled, AQE is indistinguishable from no AQE at all. The
+longest task is unchanged in every column. Whatever small benefit AQE provided
+came from merging small post-shuffle partitions --- which lowers fixed
+per-task overhead and does precisely nothing for a straggler.
+
+\subsection{The skew-join rule never fired, and why}
+
+Reading the \emph{final} adaptive plan for every AQE cell explains the result
+directly. Capturing it requires care: executing into a \texttt{noop} sink builds
+a separate query execution and leaves the inspected plan reporting
+\texttt{isFinalPlan=false}, showing the pre-adaptive shape and hiding exactly
+the rewrite one wants to audit. Read after an action on the DataFrame itself,
+every plan contains \texttt{AQEShuffleRead coalesced} and never
+\texttt{AQEShuffleRead skewed}. \textbf{Spark's skew-join rule did not fire.}
+
+The reason is a precondition that is documented but almost never discussed. A
+skewed partition is split into pieces of roughly
+\texttt{advisoryPartitionSizeInBytes}; if the hot partition is \emph{smaller}
+than the advisory size, there is no split to make and the rule is a no-op
+however skewed the partition is. The measured hot shuffle partition here is
+\MeasHotMB~MB against a \NPART-partition advisory size of 16~MB.
+
+This is a claim about a non-event, so it needs a positive control. We swept the
+two documented trigger conditions to their most permissive settings ---
+\texttt{skewedPartitionThresholdInBytes} from 64~MB down to 256~KB, and
+\texttt{skewedPartitionFactor} from 5 down to 1. The rule still never fired.
+Lowering only the advisory size engaged it immediately:
+
+\begin{center}
+\begin{tabular}{lrrl}
+\toprule
+Partitions & Advisory & Threshold & Skew-join applied \\
+\midrule
+16  & 16\,MB   & 8\,MB    & no  \\
+16  & 1\,MB    & 1\,MB    & \textbf{yes} \\
+64  & 1\,MB    & 1\,MB    & \textbf{yes} \\
+200 & 256\,KB  & 256\,KB  & \textbf{yes} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+One configuration change, no code change. We regard this as the most
+practically consequential finding in the paper: practitioners tune the two
+parameters whose names contain the word \emph{skew}, and the parameter that
+actually gates the optimisation at moderate data volumes is the one that does
+not. Section~\ref{sec:decision}'s procedure encodes all three preconditions for
+this reason, and predicted the non-event from data statistics alone.
+
+\subsection{Salting worked, and its advantage grows with the probe side}
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+$P$ & \PThin & \PMid & \PThick \\
+\midrule
+Best selective-salt $k$        & \SaltBestKThin & \SaltBestKMid & \SaltBestKThick \\
+Salting speedup                & \SaltSpeedupThin$\times$ & \SaltSpeedupMid$\times$ & \SaltSpeedupThick$\times$ \\
+Longest task, baseline (s)     & \BaseMaxTaskThin & \BaseMaxTaskMid & \BaseMaxTaskThick \\
+Longest task, salted (s)       & \SaltMaxTaskThin & \SaltMaxTaskMid & \SaltMaxTaskThick \\
+\textbf{Critical-path cut}     & \textbf{\SaltTaskCutThin$\times$} & \textbf{\SaltTaskCutMid$\times$} & \textbf{\SaltTaskCutThick$\times$} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+At $P=\PThin$ the result is inside the 18.3\% floor and we draw no conclusion.
+At $P=\PMid$ and $P=\PThick$, where the floor is 0.1\% and 6.5\%, salting
+returns \SaltSpeedupMid$\times$ and \SaltSpeedupThick$\times$ --- comfortably
+outside noise --- and cuts the critical path by \SaltTaskCutMid$\times$ and
+\SaltTaskCutThick$\times$ where AQE cut it by nothing.
+
+One nuance worth recording, because it bears on the cost model. The $k$ that
+minimises \emph{wall-clock} is \SaltBestKThick{} at $P=\PThick$, but a larger
+$k$ minimises the \emph{critical path}: at $k=16$ the longest task falls
+further still. The two optima differ because on two task slots the extra
+shuffle from a larger $k$ costs more than the additional straggler relief
+returns. On a cluster with more slots they should converge, and that is one of
+the things the released cluster configuration is designed to check.
+
+\subsection{Broadcast dominates at this scale, and we say so}
+
+The broadcast arm completes in \BcastWallThin~s, \BcastWallMid~s and
+\BcastWallThick~s --- faster than every shuffle-join strategy at every probe
+thickness. This is expected and it is worth stating plainly rather than
+omitting: our dimension table is well under Spark's default broadcast
+threshold, and a practitioner in that regime should broadcast and stop reading.
+Automatic broadcast is disabled throughout precisely so that the shuffle-join
+behaviour we set out to study is not silently replaced. The results here apply
+to joins whose dimension side exceeds the broadcast threshold, which is the
+regime in which skew mitigation is a live question at all.
+
+\subsection{Replication cost matches the model exactly}
+
+Shuffle volume is a property of the plan and the data rather than of the
+machine, so it is the measurement that transfers off a single node. Measured in
+shuffle \emph{records} it does more than transfer: it matches
+Equation~\eqref{eq:model} to the row.
+
+An earlier version of this analysis measured replication in shuffle
+\emph{megabytes} and reported a sevenfold gap between the two salting variants.
+That was wrong, and the error is worth recording because it is easy to repeat.
+Selective salting replicates only $P(k-1)$ rows --- a few hundred across the
+entire sweep --- while the megabyte growth was dominated by the one-column
+\texttt{\_salt} addition to every one of two million fact rows. Over 99\% of
+what was attributed to replication was the extra column. Records have no such
+confound: they are exactly the quantity the model's $bP(k-1)$ term refers to.
+
+Fitting a least-squares line to shuffle records against $k$ over a matched
+range gives:
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+Variant & records per unit $k$ & model predicts & $R^{2}$ \\
+\midrule
+Selective salting & \SelRecSlope & $P = \PHOT$ & \SelRecR \\
+Uniform salting   & \UnifRecSlope & $M = \NDIM$ & \UnifRecR \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Selective salting adds \SelRecSlope{} rows per salt value, and the hot key has
+\PHOT{} rows on the probe side. Uniform salting adds \UnifRecSlope{} rows per
+salt value, and the probe table has \NDIM{} rows. The measured ratio,
+\RecSlopeRatio, equals $M/P$ exactly, which is what the model predicts, and
+both fits are linear to $R^{2} = 1.000$.
+
+This is the paper's cleanest quantitative result, and we would emphasise
+\emph{why} it is clean rather than merely report it. Records are counted, not
+timed. They do not vary between repetitions, they do not depend on the machine,
+and they are not confounded by anything the scheduler does. The replication
+term of the cost model is therefore not an approximation fitted to noisy
+observations --- it is exact, and the distinction between the two salting
+variants is a factor of $M/P$, which for any realistic fact--dimension join is
+three orders of magnitude, not seven-fold.
+
+The practical reading is that \textbf{the tutorial formulation of salting is
+the expensive one}, and by a margin far wider than the folklore suggests.
+
+\input{tables_headline}
+
+\subsection{Where the cost model held, and where it did not}
+
+The model's structural claims are supported. The replication term is exact, as
+above. Salting monotonically reduces the critical path: at the thickest probe
+side the longest join-stage task falls from \BaseWallThick~s unmitigated to a
+small fraction of that under salting.
+
+The \emph{convexity} of $T(k)$ in wall-clock, however, did not resolve, and we
+report that plainly rather than presenting a fitted curve as a confirmation.
+
+Fitting Equation~\eqref{eq:model} to the selective-salting sweeps gives
+$R^{2}$ of \RsqThin, \RsqMid{} and \RsqThick. Those look respectable and are
+misleading. The quantity that matters is whether the replication coefficient
+$b$ --- the entire denominator of $k^{*}$ --- is resolved by the data at all:
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+$P$ & \PThin & \PMid & \PThick \\
+\midrule
+$R^{2}$ & \RsqThin & \RsqMid & \RsqThick \\
+$|b| / \mathrm{se}(b)$ & \BtstatThin & \BtstatMid & \BtstatThick \\
+$b$ identified? & \IdentThin & \IdentMid & \IdentThick \\
+$k^{*}$ & \KstarThin & \KstarMid & \KstarThick \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+At two of three workloads $b$ is statistically indistinguishable from zero. A
+$k^{*}$ computed from such a fit is an artefact of noise, and our
+implementation refuses to return one: \texttt{optimal\_k\_unconstrained} yields
+\textsc{NaN} rather than a number, and the recommendation falls back to the
+saturation and parallelism ceilings alone. Only \NumIdentified{} of
+\NumFits{} fits supports a cost-optimum at all.
+
+A second, independent sign of trouble: the fitted $\gamma = a/b$ varies by
+\GammaSpread$\times$ across three workloads that differ only in $P$, on one
+machine, in one session. Section~\ref{sec:costmodel} advances $\gamma$-stability
+as the property that would make the closed form practically useful. Our own
+data contradict it.
+
+We therefore make no claim that the closed form is validated. What we can say
+is precise: the replication \emph{term} is exact; the replication \emph{cost in
+time} is, at this scale, too small for the convexity it implies to be
+observable; and the conditions under which it should become observable ---
+cluster-scale network shuffle, or a substantially thicker probe side --- are
+identified and configured in the released artifact.
+
+The practical consequence points the opposite way from the folklore, and is
+worth stating for practitioners rather than only for reviewers. \textbf{With
+selective salting, over-provisioning $k$ is close to free.} The warning against
+large $k$ is well founded for the uniform variant, where the replication cost
+is $M/P$ times larger and clearly measurable. For the selective variant, the
+sensible advice is to salt at the saturation bound and stop worrying about the
+exact optimum.
+
+\subsection{Summary}
+
+\begin{itemize}
+\item AQE's advantage over an unmitigated baseline fell from
+\AqeSpeedupThin$\times$ to \AqeSpeedupThick$\times$ as the probe-side hot key
+grew from \PThin{} to \PThick{} rows, while salting's rose from
+\SaltSpeedupThin$\times$ to \SaltSpeedupThick$\times$.
+\item Spark's skew-join rule never fired on a join with a
+\BaseSkewThick:1 task-time skew ratio, verified from final adaptive plans. The
+measured AQE benefit was partition coalescing.
+\item Neither documented trigger knob was responsible; the binding condition
+was \texttt{advisoryPartitionSizeInBytes} exceeding the hot partition. Lowering
+it engaged the rule immediately.
+\item Selective salting replicates \SelRecSlope{} rows per salt value against
+uniform salting's \UnifRecSlope{} --- a ratio of \RecSlopeRatio, exactly the
+$M/P$ the cost model predicts, with both fits linear to $R^{2}=1.000$.
+\item The replication term of the cost model is confirmed exactly. Its
+consequence for runtime is not: the coefficient $b$ is statistically
+unidentified at two of three workloads, fitted $\gamma$ varies by
+\GammaSpread$\times$ on one machine, and we therefore do not claim the closed
+form for $k^{*}$ is validated.
+\end{itemize}

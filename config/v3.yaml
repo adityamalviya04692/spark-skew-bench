@@ -1,0 +1,41 @@
+# v3 grid. Supersedes pilot.yaml and extended.yaml, and is the configuration
+# behind every number in the paper. Differences from the earlier grids, each
+# added in response to an audit finding:
+#
+#  * advisory_partition_size is stated EXPLICITLY. Spark's default is 64MB; the
+#    earlier grid inherited 16MB from a dataclass default, which left the one
+#    parameter the paper's headline finding is about invisible in the config.
+#  * a third Spark profile disables coalescePartitions, giving the control that
+#    separates AQE's coalescing benefit from its skew-join benefit.
+#  * the broadcast arm is actually run, so "six strategies" becomes true.
+#  * theta is swept, hot_keys > 1 is exercised, and real C-MAPSS payloads are
+#    included -- all three were claimed in the earlier draft and never run.
+repetitions: 5
+warmup: 1
+
+workloads:
+  # --- probe-side thickness sweep (the main story) ---
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 1,  hot_keys: 1, n_sensors: 12, seed: 20260818}
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 12, seed: 20260818}
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 32, hot_keys: 1, n_sensors: 12, seed: 20260818}
+  # --- theta sweep, including theta = 0 as a no-skew control ---
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 0.0, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 12, seed: 20260818}
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 0.9, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 12, seed: 20260818}
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.5, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 12, seed: 20260818}
+  # --- multi-hot-key ---
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 10, hot_keys: 10, n_sensors: 12, seed: 20260818}
+  # --- real NASA C-MAPSS payloads (FD004, 249 units) ---
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 249, theta: 1.2, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 21, source: cmapss, cmapss_subset: FD004, seed: 20260818}
+
+spark:
+  - {master: "local[2]", driver_memory: "4g", shuffle_partitions: 16, aqe_enabled: false, autobroadcast_threshold: -1, advisory_partition_size: "16MB", skewed_partition_threshold: "8MB", skewed_partition_factor: 5}
+  - {master: "local[2]", driver_memory: "4g", shuffle_partitions: 16, aqe_enabled: true,  autobroadcast_threshold: -1, advisory_partition_size: "16MB", skewed_partition_threshold: "8MB", skewed_partition_factor: 5, aqe_coalesce_enabled: true}
+  - {master: "local[2]", driver_memory: "4g", shuffle_partitions: 16, aqe_enabled: true,  autobroadcast_threshold: -1, advisory_partition_size: "16MB", skewed_partition_threshold: "8MB", skewed_partition_factor: 5, aqe_coalesce_enabled: false}
+
+arms:
+  - {name: baseline,       k: [1]}
+  - {name: broadcast,      k: [1]}
+  - {name: aqe,            k: [1]}
+  - {name: salt_selective, k: [1, 2, 4, 8, 16, 32]}
+  - {name: salt_uniform,   k: [2, 8, 32]}
+  - {name: aqe_salt,       k: [8]}

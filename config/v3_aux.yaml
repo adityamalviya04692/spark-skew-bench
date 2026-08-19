@@ -1,0 +1,33 @@
+# v3 grid. Supersedes pilot.yaml and extended.yaml, and is the configuration
+# behind every number in the paper. Differences from the earlier grids, each
+# added in response to an audit finding:
+#
+#  * advisory_partition_size is stated EXPLICITLY. Spark's default is 64MB; the
+#    earlier grid inherited 16MB from a dataclass default, which left the one
+#    parameter the paper's headline finding is about invisible in the config.
+#  * a third Spark profile disables coalescePartitions, giving the control that
+#    separates AQE's coalescing benefit from its skew-join benefit.
+#  * the broadcast arm is actually run, so "six strategies" becomes true.
+#  * theta is swept, hot_keys > 1 is exercised, and real C-MAPSS payloads are
+#    included -- all three were claimed in the earlier draft and never run.
+repetitions: 5
+warmup: 1
+
+workloads:
+  # Supporting axes: theta, multi-hot-key, and real NASA C-MAPSS payloads.
+  # Reduced arm set -- these exist to show the findings are not an artefact of
+  # one key distribution, not to re-derive the cost model.
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 0.0, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 12, seed: 20260818}
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.5, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 12, seed: 20260818}
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 10, hot_keys: 10, n_sensors: 12, seed: 20260818}
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 249, theta: 1.2, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 21, source: cmapss, cmapss_subset: FD004, seed: 20260818}
+
+spark:
+  - {master: "local[2]", driver_memory: "4g", shuffle_partitions: 16, aqe_enabled: false, autobroadcast_threshold: -1, advisory_partition_size: "16MB", skewed_partition_threshold: "8MB", skewed_partition_factor: 5}
+  - {master: "local[2]", driver_memory: "4g", shuffle_partitions: 16, aqe_enabled: true,  autobroadcast_threshold: -1, advisory_partition_size: "16MB", skewed_partition_threshold: "8MB", skewed_partition_factor: 5, aqe_coalesce_enabled: true}
+  - {master: "local[2]", driver_memory: "4g", shuffle_partitions: 16, aqe_enabled: true,  autobroadcast_threshold: -1, advisory_partition_size: "16MB", skewed_partition_threshold: "8MB", skewed_partition_factor: 5, aqe_coalesce_enabled: false}
+
+arms:
+  - {name: baseline,       k: [1]}
+  - {name: aqe,            k: [1]}
+  - {name: salt_selective, k: [1, 4, 16]}

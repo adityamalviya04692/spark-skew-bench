@@ -1,0 +1,23 @@
+# Pilot grid: runs on a 2-core laptop. Wide enough to expose the salt-cardinality
+# U-curve and to sweep the probe-side hot-key count P, which is what tests the
+# model's prediction that the optimum falls as 1/sqrt(P).
+repetitions: 5
+warmup: 1
+
+workloads:
+  # hot_dim_multiplier is the hot key's over-representation on the probe side.
+  # 1 = one-sided skew; 10 and 32 are progressively two-sided.
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 1,  hot_keys: 1, n_sensors: 12, seed: 20260818}
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 12, seed: 20260818}
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 32, hot_keys: 1, n_sensors: 12, seed: 20260818}
+
+spark:
+  - {master: "local[2]", driver_memory: "4g", shuffle_partitions: 16, aqe_enabled: false, autobroadcast_threshold: -1, skewed_partition_threshold: "8MB", skewed_partition_factor: 5}
+  - {master: "local[2]", driver_memory: "4g", shuffle_partitions: 16, aqe_enabled: true,  autobroadcast_threshold: -1, skewed_partition_threshold: "8MB", skewed_partition_factor: 5}
+
+arms:
+  - {name: baseline,       k: [1]}
+  - {name: aqe,            k: [1]}
+  - {name: salt_selective, k: [1, 2, 4, 8, 16, 32, 64]}
+  - {name: salt_uniform,   k: [2, 8, 32]}
+  - {name: aqe_salt,       k: [2, 4, 8, 16]}

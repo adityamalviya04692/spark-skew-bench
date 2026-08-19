@@ -1,0 +1,118 @@
+\section{Problem Formulation}
+\label{sec:problem}
+
+\subsection{Notation}
+
+Consider an inner equi-join $F \bowtie_{\kappa} D$ on key $\kappa$, where $F$ is
+the larger, skewed side with $N$ rows and $D$ the probe side with $M$ rows.
+Spark hash-partitions both sides into $p$ shuffle partitions
+(\texttt{spark.sql.shuffle.partitions}) and executes a sort-merge join with $C$
+concurrently schedulable task slots.
+
+Let the key frequencies on $F$ follow a truncated Zipf law over $n$ distinct
+keys, $\Pr[\kappa = i] \propto i^{-\theta}$, and let key $1$ be the hot key.
+Write
+
+\begin{itemize}
+\item $H$ for the rows of $F$ carrying the hot key,
+\item $P$ for the rows of $D$ carrying the hot key.
+\end{itemize}
+
+Both are obtainable before execution, from table statistics, a sampled
+frequency sketch, or the catalogue.
+
+It is convenient to express $P$ relative to the probe side's mean rows per key,
+$\bar{m} = M/n$, through a \emph{hot-key multiplier}
+\begin{equation}
+\mu \;=\; \frac{P}{\bar{m}} ,
+\label{eq:mu}
+\end{equation}
+so that $\mu = 1$ is a probe side with no concentration at all --- one-sided
+skew --- and larger $\mu$ makes the skew progressively two-sided. Treating the
+degree of two-sidedness as continuous rather than binary matters for two
+reasons, one practical and one methodological, and we return to both in
+Section~\ref{sec:methodology}.
+
+\subsection{The skew ratio}
+
+The quantity that governs everything is dimensionless:
+
+\begin{equation}
+\rho \;=\; \frac{H}{N/p}
+\label{eq:rho}
+\end{equation}
+
+the hot key's rows divided by the mean rows per shuffle partition. It says how
+many ordinary partitions' worth of work has been concentrated into one.
+
+Equation~\eqref{eq:rho} is a property of the data and the partition count
+alone. It contains no hardware term, which is what allows a rule built on it to
+be stated once and applied on any cluster. When $\rho \le 1$ there is no
+straggler to remove. When $\rho \gg 1$ the stage's completion time is
+essentially the hot task's completion time, regardless of how many executors are
+provisioned.
+
+\subsection{Why $\mu$ cannot be taken to its limit}
+
+There is a natural temptation to construct the two-sided case by drawing both
+sides from the same Zipf law. It does not work, and the reason is worth stating
+because it constrains any experiment in this area.
+
+If both sides follow the same law, the hot key contributes $H \times P$ rows to
+the join output on its own. At the scales used here that is order $10^{9}$
+rows from a single key, a thousandfold amplification of the fact table --- the join has become a near-cartesian product, and
+any measurement of it reports the cost of materialising that product rather
+than the cost of the skew mitigation under test. Bounding $\mu$ explicitly
+keeps the output tractable and, more usefully, promotes $P$ to an independent
+variable. Equation~\eqref{eq:kstar} predicts that the optimal salt cardinality
+falls as $1/\sqrt{P}$; that prediction is only testable if $P$ can be swept.
+
+\subsection{Two mechanisms, one problem}
+
+\subsubsection{AQE skew-join}
+Spark's \texttt{OptimizeSkewedJoin} rule classifies a shuffle partition as
+skewed when its size exceeds \emph{both} an absolute threshold
+(\texttt{skewedPartitionThresholdInBytes}) and a multiple
+(\texttt{skewedPartitionFactor}) of the median partition size. It then splits
+the offending partition into sub-partitions of roughly the advisory size and
+\emph{replicates the corresponding partition of the other side} to each split,
+so that every sub-partition retains its join partners~\cite{spark_aqe_docs,
+xue2024adaptive}.
+
+The replication is the hinge. If the other side's matching partition is small
+--- the one-sided case --- replication is nearly free and the rule works as
+advertised. If the other side is also concentrated on the same key --- the
+two-sided case --- then each of the $s$ splits inherits a large partner, the
+probe-side work multiplies by $s$, and the relief on the critical path is
+partly or wholly cancelled. Metwally~\cite{metwally2025amjoin} identifies
+doubly-skewed keys as the hard case for exactly this reason.
+
+\subsubsection{Salting}
+Salting rewrites the key. On $F$, the hot key is replaced by
+$(\kappa, \sigma)$ with $\sigma$ drawn uniformly from $\{0,\dots,k-1\}$; on
+$D$, each matching row is emitted $k$ times, once per salt value. One heavy
+key becomes $k$ lighter ones.
+
+We distinguish two variants, because their costs differ by orders of magnitude
+and the literature does not separate them:
+
+\begin{description}
+\item[Uniform salting] every row of $D$ is replicated $k$ times. This is the
+form shown in most tutorials. Replication cost scales with $M$.
+\item[Selective salting] only rows whose key is hot are replicated; all other
+rows carry salt $0$ on both sides and join exactly as before. Replication cost
+scales with $P$.
+\end{description}
+
+Since $P \ll M$ in any realistic fact--dimension join, the distinction is not a
+detail. We evaluate both.
+
+\subsection{What is actually being traded}
+
+Salting does not remove work; it moves it. Splitting the hot key across $k$
+sub-keys reduces the critical task's input from $H$ to approximately $H/k$
+rows, and simultaneously introduces $P(k-1)$ probe-side rows that did not
+previously exist. One term falls, the other rises, and the practitioner is
+choosing a point on that curve without being told there is a curve.
+
+The next section prices it.

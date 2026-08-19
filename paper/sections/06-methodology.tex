@@ -1,0 +1,122 @@
+\section{Experimental Methodology}
+\label{sec:methodology}
+
+\subsection{\textsc{skewbench}}
+
+We implement the study as an open harness rather than a set of scripts, because
+the artifact is as much the contribution as the numbers. \textsc{skewbench}
+comprises a workload generator, six join strategies, an event-log metrics
+parser, an experiment driver, and the cost model of
+Section~\ref{sec:costmodel}. Every result in this paper is produced by a single
+command and every figure and table is generated from the results file with no
+manual transcription.
+
+\subsection{Workload generation}
+
+The generator produces two Parquet tables with an aerospace engine-telemetry
+schema, following the NASA C-MAPSS turbofan degradation
+convention~\cite{saxena2008cmapss} --- unit identifier, operational cycle,
+three operational settings, and $N_s$ sensor channels --- so that the synthetic
+generator can be exchanged for the real dataset without touching the benchmark.
+
+\texttt{fact\_telemetry} is the skewed side: one row per sensor snapshot, with
+\texttt{engine\_id} drawn from a truncated Zipf law over $n$ engines. This
+mirrors a real fleet, in which a small number of problem units generate a
+disproportionate share of recorded events. \texttt{dim\_maintenance} is the
+probe side: one row per maintenance work order. Its keys are uniform except for
+the hot key, which carries $\mu$ times the mean per-key row count.
+
+The choice to parameterise two-sidedness by $\mu$ rather than by drawing the
+probe side from the same Zipf law is the single most consequential design
+decision in the harness, and it is not cosmetic. Under a doubly-Zipf design the
+hot key alone yields $H \times P$ output rows. With $H \approx 4.4\times10^{5}$
+and $P \approx 4.4\times10^{3}$ that is roughly $2\times10^{9}$ rows from a
+single key --- a thousandfold amplification of a two-million-row fact table,
+which we observed as a run that made no progress and abandoned. Such a workload
+does not measure skew mitigation; it measures the cost of materialising a
+near-cartesian product, and every strategy looks equally bad because all of
+them are dominated by output volume. Bounding $\mu$ keeps the
+output tractable and promotes $P$ from an artefact of the generator to a swept
+independent variable, which is what makes the $1/\sqrt{P}$ prediction testable
+at all.
+
+Skewed variants of TPC-H exist~\cite{microsoft_skewgen, tpch} and the harness
+accepts them, but they do not provide a controllable $\mu$, which is the
+condition our decision rule turns on. Generation is deterministic given a seed,
+and the manifest written alongside the data records $H$ and $P$ exactly, so no
+later stage must re-derive them.
+
+\subsection{Strategies evaluated}
+
+\begin{enumerate}
+\item \textbf{baseline} --- sort-merge join, AQE disabled, no mitigation.
+\item \textbf{aqe} --- AQE enabled with skew-join optimisation.
+\item \textbf{salt\_uniform}$(k)$ --- whole probe side replicated $k$ times,
+AQE disabled.
+\item \textbf{salt\_selective}$(k)$ --- hot-key rows only replicated, AQE
+disabled.
+\item \textbf{aqe\_salt}$(k)$ --- AQE enabled \emph{and} selective salting.
+\item \textbf{broadcast} --- broadcast hash join, where the probe side fits.
+\end{enumerate}
+
+Automatic broadcast is disabled throughout
+(\texttt{autoBroadcastJoinThreshold} $=-1$) except in the broadcast arm, so
+that a strategy under test is never silently replaced by a different plan. Each
+arm's executed physical plan is captured into the results file, so that the
+claim ``this was a sort-merge join'' is auditable rather than asserted.
+
+\subsection{Metrics}
+
+We separate metrics by what they license.
+
+\textbf{Deterministic.} Shuffle bytes read and written, records shuffled, and
+bytes spilled to memory and disk are properties of the physical plan and the
+partitioning. They are identical on a laptop and on a hundred-node cluster
+given the same plan and the same data, and the quantitative claims about
+replication cost rest on them.
+
+\textbf{Structural.} The \emph{skew ratio} --- maximum over median task
+duration within the join stage --- and the task-time coefficient of variation
+are within-run ratios. They cancel most machine-specific scaling while still
+capturing the straggler that skew produces, and they are how we measure whether
+a mitigation actually worked as opposed to merely running faster.
+
+\textbf{Machine-dependent.} Wall-clock and executor run time. Reported, used to
+calibrate $\gamma$, and never load-bearing for a transferable claim.
+
+Metrics are recovered by parsing the Spark event log --- a JSON-lines file
+written by Spark itself --- rather than through a listener callback. The log
+survives the driver exiting and can be re-analysed later without re-running
+anything, which is what makes a result auditable months after the fact. Each
+measurement is tagged with a unique Spark job group, giving an exact rather
+than timestamp-inferred mapping from a results row to the tasks that produced
+it.
+
+\subsection{Execution protocol}
+
+Each cell runs one warmup execution, discarded, followed by five timed
+repetitions. Warmup matters because the first execution of a plan pays JIT
+compilation, class loading and page-cache misses, and including it inflates the
+mean unevenly across arms. We report the \emph{median} and interquartile range
+rather than mean and standard deviation, because run times on a shared machine
+have a long right tail.
+
+Materialisation is forced with Spark's \texttt{noop} sink, so no rows are
+written to disk or shipped to the driver and the measurement is of the join and
+its aggregation alone. The terminal operation is a grouped aggregation touching
+columns from both sides, not a \texttt{count()}: counting invites the optimizer
+to prune the payload and, on some plans, to skip the probe entirely, which
+would measure column pruning rather than the strategy under test.
+
+\subsection{Platform}
+
+Measurements were taken on a single node with \CORES\ cores and \DRIVERMEM\ of
+driver memory, Apache Spark \SPARKVER\ on OpenJDK \JAVAVER, with dedicated
+local compute --- not shared serverless. This choice is deliberate: Nurdin et
+al.~\cite{nurdin2026lakehouseperf} measure roughly twofold run-to-run variance
+for identical lakehouse queries on shared cloud compute, which would make
+timing claims meaningless. We are trading absolute scale for measurement
+control, and Section~\ref{sec:threats} states what that costs us.
+
+The full configuration grid, the raw event logs, and the exact software
+versions are included in the artifact.

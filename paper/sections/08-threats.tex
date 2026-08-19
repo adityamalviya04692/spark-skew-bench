@@ -1,0 +1,172 @@
+\section{Threats to Validity}
+\label{sec:threats}
+
+\subsection{Single-node measurement}
+
+This is the principal threat and we state it without hedging. All measurements
+were taken on one machine with a small number of cores. Absolute wall-clock
+times therefore do not transfer to a cluster, and we make no claim that they
+do.
+
+What survives the objection is specific. Shuffle volume and spill volume are
+determined by the physical plan and the data partitioning, not by the machine:
+selective salting with $k=32$ replicates the same probe-side rows on a laptop
+as on a hundred nodes. The skew ratio is a within-run ratio of task durations
+and cancels most machine-specific scaling. And the model's structure ---
+convexity in $k$, the $\sqrt{H/P}$ dependence, the two ceilings --- is
+analytic, not measured; the experiments test whether it holds, and the
+calibration constant $\gamma$ is expected to differ per platform, which is why
+it is a calibrated parameter and not a published number.
+
+What does \emph{not} survive is any claim about network shuffle. A single-node
+Spark shuffle writes to local disk and reads back; a cluster shuffle crosses the
+network, where the replication cost of salting is materially higher. Our
+estimate of $b$ is therefore \emph{conservative}, and the true $k^{*}$ on a
+cluster should be \emph{smaller} than we report --- which strengthens rather
+than weakens the paper's central practical claim that customary salt
+cardinalities are too large. We flag this asymmetry explicitly so that a reader
+does not have to infer it.
+
+The parallelism ceiling is the sharpest limitation. With few task slots, $C$
+binds in Equation~\eqref{eq:keff} for most configurations, so our measurements
+exercise that branch more than the cost-optimum branch. We address this by
+reporting the model's projection across $C$ rather than only the measured
+point, and by being clear that the projection is a projection.
+
+\subsection{Synthetic data}
+
+Zipf is a model of skew, not skew itself. Real key distributions have
+structure --- correlated hot keys, temporal drift, keys hot on one side only in
+certain periods --- that a stationary Zipf law does not reproduce. We mitigate
+this by using an established distributional form, by sweeping $\theta$ rather
+than fixing it, by adopting a schema from a real prognostics
+dataset~\cite{saxena2008cmapss}, and by including a multi-hot-key
+configuration. The harness accepts skewed TPC-H~\cite{microsoft_skewgen} and
+real C-MAPSS data as drop-in replacements. But a study on production key
+distributions would be stronger, and we do not have one.
+
+\subsection{Bounded probe-side multiplicity}
+
+Our two-sided workloads cap the hot key's probe-side representation at $\mu$
+times the mean rather than letting it follow the fact side's Zipf law. This is
+a deliberate bound, justified in Section~\ref{sec:methodology}, but it is a
+restriction on generality: production joins do exist in which both sides are
+severely concentrated and the output genuinely explodes. For those, the binding
+problem is output cardinality rather than straggler relief, and neither
+mechanism studied here is the right answer --- the correct response is to
+change the query, not to tune the join. We regard that as a different problem,
+and we do not claim our results speak to it.
+
+\subsection{Version specificity}
+
+AQE's skew-join rule, its defaults, and the interaction between
+\texttt{coalescePartitions} and \texttt{skewJoin} all change between Spark
+releases, and the production descendant described by Xue et
+al.~\cite{xue2024adaptive} differs from the open-source rule. Our measurements
+pin one version, recorded in the artifact. The cost model does not depend on
+the version; the decision procedure's Branch 2, which reasons about the trigger
+condition, does.
+
+\subsection{Construct validity of the skew ratio}
+
+Maximum over median task duration is a proxy, and it has a confound serious
+enough that we no longer use it as a primary metric.
+
+The problem is the denominator. AQE's partition coalescing merges the sixteen
+shuffle partitions into three, which changes what ``the median task'' refers to
+without changing the straggler at all. Comparing a three-task stage's
+max-over-median against a sixteen-task stage's is comparing different
+quantities. In our data this inverts the ranking: at the thickest probe side
+the AQE arm reports a far lower skew ratio than the unmitigated baseline while
+its slowest task is \emph{longer} in absolute terms. Any reader who took the
+ratio at face value would conclude the opposite of the truth.
+
+We therefore report three things instead. The \emph{absolute maximum task
+duration} in the join stage, which is the critical path and has no denominator
+to move. The \emph{straggler index}, maximum over \emph{mean} task duration:
+because total task time is roughly conserved under coalescing, the mean is
+stable where the median is not. And \emph{task counts} alongside every ratio,
+so that a reader can see immediately when two numbers are not comparable. The
+max-over-median ratio is retained only for continuity with the practitioner
+literature, which universally quotes it.
+
+The residual confounds remain: a near-zero median makes the ratio unstable, and
+task-duration variance from scheduling and garbage collection is not skew. Both
+are reasons to lead with shuffle-byte and record distributions, which have no
+such confound.
+
+\subsection{The dimension side is small enough to broadcast}
+
+Our probe table is well under Spark's default ten-megabyte automatic broadcast
+threshold. In a default configuration this join would be planned as a broadcast
+hash join, which has no shuffle and therefore no shuffle skew, and neither
+mechanism we study would be engaged at all. We disable automatic broadcast
+throughout precisely to isolate the shuffle-join behaviour we set out to
+measure, and we run the broadcast arm so that its dominance at this scale is
+visible in the results rather than hidden by the configuration.
+
+The honest scope statement follows: our results apply to fact--dimension joins
+in which the dimension side exceeds the broadcast threshold, which is the
+regime where skew mitigation is a live question. A reader whose dimension table
+fits in a broadcast should broadcast it and stop reading.
+
+\subsection{Execution order and the noise floor}
+
+An earlier version of this harness executed cells in configuration order, which
+placed the unmitigated baseline first in every workload block --- on a cold
+JVM, and therefore systematically slow. Because every speedup is measured
+against that baseline, the bias inflated all of them.
+
+We detected this with a control the harness generates for free: selective
+salting at $k=1$ compiles to exactly the same physical plan as the baseline, so
+any difference between the two is measurement noise. The discrepancy reached
+17.7\% on the first workload while remaining under 0.3\% on the later ones ---
+a clear order effect rather than random variation. Cell order is now
+randomised under a fixed seed, a session-level warmup precedes the grid, and
+the control is computed and reported for every run. It is included in the
+artifact.
+
+We state the consequence rather than burying it: \textbf{no speedup smaller
+than the control discrepancy should be read as a result}, in this paper or in
+any run of this harness.
+
+\subsection{Statistical power}
+
+Five repetitions per cell, and three for the configuration probes, is few. We
+report medians and interquartile ranges rather than means and standard
+deviations, and we do not attach $p$-values to five-against-five comparisons,
+where the smallest attainable two-sided rank-test $p$ is above the conventional
+threshold in any case. Differences of a few percent in wall-clock are within
+noise at this sample size and we do not interpret them. The deterministic
+counters --- shuffle bytes and records --- carry the claims that need
+precision, and they do not vary between repetitions at all.
+
+\subsection{One partition count, one core count}
+
+Every reported cell uses sixteen shuffle partitions and two task slots. The
+parallelism ceiling therefore binds the recommendation in essentially every
+configuration, which means the cost-optimum branch of
+Equation~\eqref{eq:keff} --- the branch the closed form exists to serve --- is
+never the operative one in our own data. This is the sharpest reason the
+cluster validation described in Section~\ref{sec:conclusion} matters, and it
+is why we release the cluster configuration alongside the single-node one.
+
+\subsection{Generalisation beyond inner equi-joins}
+
+We evaluate inner equi-joins on a single key. Outer joins, multi-key joins,
+joins whose skewed key is also the aggregation key, and joins feeding a
+subsequent shuffle all plausibly behave differently. The model's derivation
+does not obviously break for these cases, but we have not tested them, and we
+do not claim them.
+
+\subsection{Absence claims}
+
+Section~\ref{sec:background} rests on two negative results: no independent
+evaluation of Spark's skew-join rule, and no peer-reviewed treatment of
+salting. Negative results in literature search are only as good as the search.
+Ours covered dblp, the arXiv full-metadata API, Crossref, and domain-scoped
+searches across the major publishers, but Semantic Scholar and OpenAlex were
+unavailable, and at least one relevant paper~\cite{phan2022skewjoin} is not
+indexed in dblp. We therefore present these as strong evidence of a gap rather
+than as proof of one, and we cite the nearest existing work explicitly rather
+than claiming an empty field.

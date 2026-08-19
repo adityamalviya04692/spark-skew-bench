@@ -1,0 +1,105 @@
+\section{Introduction}
+
+A join between a large fact table and a smaller dimension table is the most
+common heavy operation in an analytics pipeline, and skew in the join key is
+the most common reason such a join is slow. When one key carries a large share
+of the rows, hash partitioning sends them all to a single reducer, one task
+runs far longer than its peers, and the stage finishes when that task finishes.
+Adding compute does not help: the straggler is serial. The effect was
+characterised for parallel joins three decades ago~\cite{walton1991taxonomy,
+dewitt1992skew} and re-confirmed at production scale in every generation of
+big-data system since~\cite{chaiken2008scope, ananthanarayanan2010mantri,
+kwon2012skewtune}.
+
+Apache Spark~\cite{zaharia2012rdd, armbrust2015sparksql} addresses skew
+automatically. Since version 3.0, the \emph{Adaptive Query Execution} (AQE)
+framework re-optimises a plan between stages using statistics observed at
+runtime, and its \texttt{OptimizeSkewedJoin} rule detects a shuffle partition
+that is disproportionately large, splits it, and replicates the matching
+partition on the other side so that every split finds its
+partners~\cite{databricks_aqe, spark_aqe_docs, xue2024adaptive}.
+
+And yet practitioners keep salting by hand. \emph{Salting} appends a random
+suffix drawn from $\{0,\dots,k-1\}$ to the join key on the skewed side and
+replicates the matching rows $k$ times on the other side, so that one heavy key
+becomes $k$ lighter ones. The technique is ubiquitous in industry and, as we
+establish in Section~\ref{sec:background}, entirely absent from the
+peer-reviewed literature under that name. It is transmitted through vendor
+documentation, conference talks and blog posts, none of which prices what it
+costs.
+
+That silence matters, because salting is not free. Every additional salt value
+multiplies the rows that must be replicated and shuffled on the opposite side.
+The straggler term falls as $1/k$; the replication term rises linearly in $k$.
+Total time is therefore \emph{convex} in $k$ with an interior minimum, and the
+standard advice --- ``pick a reasonable $k$, say 16 or 32'' --- is not advice at
+all. It names a point on a curve whose shape nobody has published.
+
+\subsection{The questions this paper answers}
+
+\begin{enumerate}
+\item Given a join's key distribution and Spark's configuration, will AQE's
+skew-join rule suffice on its own, or is explicit salting still required?
+\item If salting is required, what value of $k$ minimises total cost, and can
+it be derived from statistics available before the query runs rather than found
+by trial and error?
+\item Does combining AQE with salting help, hurt, or do nothing?
+\end{enumerate}
+
+\subsection{Contributions}
+
+\begin{itemize}
+\item \textbf{A cost model for salt cardinality.} We formulate the salting
+trade-off as $T(k) = aH/k + bP(k-1) + c$, where $H$ and $P$ are the hot-key row
+counts on the skewed and probe sides, and derive the closed-form optimum
+$k^{*}=\sqrt{aH/(bP)}$. The single free ratio $\gamma = a/b$ is a property of
+the engine and hardware, calibrated once and reused
+(Section~\ref{sec:costmodel}).
+
+\item \textbf{Two ceilings that bound the useful range.} Beyond
+$k=\rho$, where $\rho$ is the hot key's rows divided by the mean rows per
+partition, the hot task is no longer the straggler and further splitting
+relieves nothing; beyond $k=C$, the number of concurrently schedulable task
+slots, the sub-partitions queue rather than overlap. \emph{Salting beyond
+$\min(\rho, C)$ is always waste} --- a bound that follows directly from the
+model and that we could not find stated anywhere in the practitioner
+literature.
+
+\item \textbf{A decision procedure.} A rule that predicts, from data statistics
+and Spark configuration alone, whether AQE will trigger, whether it will
+suffice, and what $k$ to use otherwise. Its hinge is the distinction between
+one-sided skew, which AQE is designed for, and two-sided skew, in which
+split-and-replicate degenerates because each split inherits a large partner
+(Section~\ref{sec:decision}).
+
+\item \textbf{\textsc{skewbench}, an open harness.} A reproducible benchmark
+that generates Zipfian-skewed workloads with an aerospace engine-telemetry
+schema, executes six join strategies, and recovers hardware-independent metrics
+--- shuffle bytes, spill bytes, and the within-stage ratio of maximum to median
+task duration --- by parsing the Spark event log. It runs on a commodity laptop
+(Section~\ref{sec:methodology}).
+
+\item \textbf{An empirical evaluation} over 48 configurations, which confirms
+the decay of AQE's benefit as the probe side thickens, identifies the
+precondition that actually blocked Spark's skew-join rule from ever firing, and
+quantifies the replication-cost gap between the two salting variants. It also
+reports, as a negative result, that the convexity of $T(k)$ does not resolve at
+single-node scale for selective salting (Section~\ref{sec:results}).
+\end{itemize}
+
+\subsection{Scope, stated plainly}
+
+This is an evaluation and decision-procedure paper, not an algorithm paper. We
+propose no new partitioner; the space of skew-resilient partitioning algorithms
+is already well populated~\cite{irandoost2019skewslr, gufler2011skew,
+myung2016handling, shen2020srspark, tang2021intermediate}. Our claim is that
+the prior question --- \emph{which of the mechanisms that already ship should a
+practitioner use, and how should it be parameterised} --- has gone unanswered,
+and that it is answerable.
+
+All measurements were taken on a single node. We are explicit about what that
+does and does not license. Absolute wall-clock times do not transfer to a
+cluster and we make no claim that they do; shuffle volume, spill volume and
+within-stage task-time ratios are properties of the physical plan and the data
+partitioning rather than of the machine, and it is on those that the
+quantitative claims rest. Section~\ref{sec:threats} treats this at length.

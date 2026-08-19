@@ -1,0 +1,526 @@
+% ===================================================================
+% references.bib
+% Apache Spark skewed-join mitigation: AQE vs. salting
+% All entries verified against dblp, ACM DL, IEEE Xplore, VLDB,
+% arXiv, Crossref or the publisher's own page (August 2026).
+% Fields that could not be verified have been omitted, not guessed.
+% ===================================================================
+
+% ---------- Spark core ----------
+
+@inproceedings{zaharia2012rdd,
+  author    = {Zaharia, Matei and Chowdhury, Mosharaf and Das, Tathagata and
+               Dave, Ankur and Ma, Justin and McCauly, Murphy and
+               Franklin, Michael J. and Shenker, Scott and Stoica, Ion},
+  title     = {Resilient Distributed Datasets: A Fault-Tolerant Abstraction for
+               In-Memory Cluster Computing},
+  booktitle = {Proceedings of the 9th {USENIX} Symposium on Networked Systems
+               Design and Implementation ({NSDI} '12)},
+  pages     = {15--28},
+  year      = {2012},
+  publisher = {{USENIX} Association},
+  address   = {San Jose, CA, USA},
+  url       = {https://www.usenix.org/conference/nsdi12/technical-sessions/presentation/zaharia}
+}
+
+@inproceedings{armbrust2015sparksql,
+  author    = {Armbrust, Michael and Xin, Reynold S. and Lian, Cheng and
+               Huai, Yin and Liu, Davies and Bradley, Joseph K. and
+               Meng, Xiangrui and Kaftan, Tomer and Franklin, Michael J. and
+               Ghodsi, Ali and Zaharia, Matei},
+  title     = {{Spark SQL}: Relational Data Processing in {Spark}},
+  booktitle = {Proceedings of the 2015 {ACM} {SIGMOD} International Conference
+               on Management of Data ({SIGMOD} '15)},
+  pages     = {1383--1394},
+  year      = {2015},
+  publisher = {{ACM}},
+  doi       = {10.1145/2723372.2742797}
+}
+
+% ---------- Skew in MapReduce / parallel joins: foundations ----------
+
+@inproceedings{kwon2012skewtune,
+  author    = {Kwon, YongChul and Balazinska, Magdalena and Howe, Bill and
+               Rolia, Jerome},
+  title     = {{SkewTune}: Mitigating Skew in {MapReduce} Applications},
+  booktitle = {Proceedings of the 2012 {ACM} {SIGMOD} International Conference
+               on Management of Data ({SIGMOD} '12)},
+  pages     = {25--36},
+  year      = {2012},
+  publisher = {{ACM}},
+  doi       = {10.1145/2213836.2213840}
+}
+
+@article{kwon2012skewtunedemo,
+  author    = {Kwon, YongChul and Balazinska, Magdalena and Howe, Bill and
+               Rolia, Jerome},
+  title     = {{SkewTune} in Action: Mitigating Skew in {MapReduce} Applications},
+  journal   = {Proceedings of the {VLDB} Endowment},
+  volume    = {5},
+  number    = {12},
+  pages     = {1934--1937},
+  year      = {2012},
+  doi       = {10.14778/2367502.2367541}
+}
+
+@inproceedings{dewitt1992skew,
+  author    = {DeWitt, David J. and Naughton, Jeffrey F. and
+               Schneider, Donovan A. and Seshadri, S.},
+  title     = {Practical Skew Handling in Parallel Joins},
+  booktitle = {Proceedings of the 18th International Conference on Very Large
+               Data Bases ({VLDB} '92)},
+  pages     = {27--40},
+  year      = {1992},
+  publisher = {Morgan Kaufmann},
+  url       = {http://www.vldb.org/conf/1992/P027.PDF}
+}
+
+@inproceedings{walton1991taxonomy,
+  author    = {Walton, Christopher B. and Dale, Alfred G. and
+               Jenevein, Roy M.},
+  title     = {A Taxonomy and Performance Model of Data Skew Effects in
+               Parallel Joins},
+  booktitle = {Proceedings of the 17th International Conference on Very Large
+               Data Bases ({VLDB} '91)},
+  pages     = {537--548},
+  year      = {1991},
+  publisher = {Morgan Kaufmann},
+  url       = {http://www.vldb.org/conf/1991/P537.PDF}
+}
+
+@article{irandoost2019skewslr,
+  author    = {Irandoost, Mohammad Amin and Rahmani, Amir Masoud and
+               Setayeshi, Saeed},
+  title     = {{MapReduce} Data Skewness Handling: A Systematic Literature Review},
+  journal   = {International Journal of Parallel Programming},
+  volume    = {47},
+  number    = {5--6},
+  pages     = {907--950},
+  year      = {2019},
+  doi       = {10.1007/s10766-019-00627-0}
+}
+
+@article{myung2016handling,
+  author    = {Myung, Jaeseok and Shim, Junho and Yeon, Jongheum and
+               Lee, Sang-goo},
+  title     = {Handling Data Skew in Join Algorithms Using {MapReduce}},
+  journal   = {Expert Systems with Applications},
+  volume    = {51},
+  pages     = {286--299},
+  year      = {2016},
+  doi       = {10.1016/j.eswa.2015.12.024}
+}
+
+@inproceedings{gufler2011skew,
+  author    = {Gufler, Benjamin and Augsten, Nikolaus and Reiser, Angelika and
+               Kemper, Alfons},
+  title     = {Handling Data Skew in {MapReduce}},
+  booktitle = {Proceedings of the 1st International Conference on Cloud
+               Computing and Services Science ({CLOSER} 2011)},
+  pages     = {574--583},
+  year      = {2011},
+  publisher = {SciTePress}
+}
+
+% ---------- Skew-join strategies evaluated on Spark ----------
+
+@article{phan2022skewjoin,
+  author    = {Phan, Anh-Cang and Phan, Thuong-Cang and Cao, Hung-Phi and
+               Trieu, Thanh-Ngoan},
+  title     = {Comparative Analysis of Skew-Join Strategies for Large-Scale
+               Datasets with {MapReduce} and {Spark}},
+  journal   = {Applied Sciences},
+  volume    = {12},
+  number    = {13},
+  pages     = {6554},
+  year      = {2022},
+  doi       = {10.3390/app12136554}
+}
+
+@article{metwally2025amjoin,
+  author    = {Metwally, Ahmed},
+  title     = {Scaling and Load-Balancing Equi-Joins},
+  journal   = {{ACM} Transactions on Database Systems},
+  volume    = {50},
+  number    = {2},
+  pages     = {5:1--5:41},
+  year      = {2025},
+  doi       = {10.1145/3722102},
+  eprint       = {2209.08475},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.DB},
+  note      = {Introduces the {AM-Join} algorithm; preprint first posted 2022}
+}
+
+@article{tang2021intermediate,
+  author    = {Tang, Zhuo and Lv, Wei and Li, Kenli and Li, Keqin},
+  title     = {An Intermediate Data Partition Algorithm for Skew Mitigation in
+               {Spark} Computing Environment},
+  journal   = {{IEEE} Transactions on Cloud Computing},
+  volume    = {9},
+  number    = {2},
+  pages     = {461--474},
+  year      = {2021},
+  doi       = {10.1109/TCC.2018.2878838}
+}
+
+@inproceedings{shen2020srspark,
+  author    = {Shen, Yijie and Xiong, Jin and Jiang, Dejun},
+  title     = {{SrSpark}: Skew-Resilient {Spark} Based on Adaptive Parallel
+               Processing},
+  booktitle = {Proceedings of the 26th {IEEE} International Conference on
+               Parallel and Distributed Systems ({ICPADS} 2020)},
+  pages     = {466--475},
+  year      = {2020},
+  publisher = {{IEEE}},
+  doi       = {10.1109/ICPADS51040.2020.00067}
+}
+
+% ---------- Adaptive query execution / Spark query optimization ----------
+
+@article{xue2024adaptive,
+  author    = {Xue, Maryann and Bu, Yingyi and Somani, Abhishek and
+               Fan, Wenchen and Liu, Ziqi and Chen, Steven and
+               van Hovell, Herman and Samwel, Bart and Mokhtar, Mostafa and
+               Korlapati, RK and Lam, Andy and Ma, Yunxiao and
+               Ercegovac, Vuk and Li, Jiexing and Behm, Alexander and
+               Li, Yuanjian and Li, Xiao and Krishnamurthy, Sriram and
+               Shukla, Amit and Petropoulos, Michalis and
+               Paranjpye, Sameer and Xin, Reynold and Zaharia, Matei},
+  title     = {Adaptive and Robust Query Execution for Lakehouses at Scale},
+  journal   = {Proceedings of the {VLDB} Endowment},
+  volume    = {17},
+  number    = {12},
+  pages     = {3947--3959},
+  year      = {2024},
+  doi       = {10.14778/3685800.3685818}
+}
+
+@misc{he2025aqora,
+  author        = {He, Jiahao and Cui, Yutao and Li, Cuiping and
+                   Jiang, Jikang and Hou, Yuheng and Chen, Hong},
+  title         = {{AQORA}: A Learned Adaptive Query Optimizer for {Spark SQL}},
+  year          = {2025},
+  eprint        = {2510.10580},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.DB},
+  doi           = {10.48550/arXiv.2510.10580},
+  note          = {Title of arXiv v1; later revised to ``{AQORA}: A Fast
+                   Learned Adaptive Query Optimizer with Stage-Level Feedback
+                   for {Spark SQL}'' (v2) and ``{LQRS}: Learned Query
+                   Re-optimization Framework for {Spark SQL}'' (v3)}
+}
+
+@inproceedings{xin2022locat,
+  author    = {Xin, Jinhan and Hwang, Kai and Yu, Zhibin},
+  title     = {{LOCAT}: Low-Overhead Online Configuration Auto-Tuning of
+               {Spark SQL} Applications},
+  booktitle = {Proceedings of the 2022 {ACM} {SIGMOD} International Conference
+               on Management of Data ({SIGMOD} '22)},
+  pages     = {674--684},
+  year      = {2022},
+  publisher = {{ACM}},
+  doi       = {10.1145/3514221.3526157}
+}
+
+@article{lyu2024sparkopt,
+  author    = {Lyu, Chenghao and Fan, Qi and Guyard, Philippe and Diao, Yanlei},
+  title     = {A {Spark} Optimizer for Adaptive, Fine-Grained Parameter Tuning},
+  journal   = {Proceedings of the {VLDB} Endowment},
+  volume    = {17},
+  number    = {11},
+  pages     = {3565--3579},
+  year      = {2024},
+  doi       = {10.14778/3681954.3682021}
+}
+
+@article{modi2021synapse,
+  author    = {Modi, Abhishek and Rajan, Kaushik and Thimmaiah, Srinivas and
+               Jain, Prakhar and Mann, Swinky and Agarwal, Ayushi and
+               Shetty, Ajith and Shahid, K. I. and Gosalia, Ashit and
+               Sarthi, Partho},
+  title     = {New Query Optimization Techniques in the {Spark} Engine of
+               {Azure Synapse}},
+  journal   = {Proceedings of the {VLDB} Endowment},
+  volume    = {15},
+  number    = {4},
+  pages     = {936--948},
+  year      = {2021},
+  doi       = {10.14778/3503585.3503601}
+}
+
+@article{zhang2023adaptive,
+  author    = {Zhang, Yunjia and Chronis, Yannis and Patel, Jignesh M. and
+               Rekatsinas, Theodoros},
+  title     = {Simple Adaptive Query Processing vs. Learned Query Optimizers:
+               Observations and Analysis},
+  journal   = {Proceedings of the {VLDB} Endowment},
+  volume    = {16},
+  number    = {11},
+  pages     = {2962--2975},
+  year      = {2023},
+  doi       = {10.14778/3611479.3611501}
+}
+
+@misc{suri2025zeroexec,
+  author        = {Suri, Raunaq and Gofman, Ilan and Yu, Guangwei and
+                   Cresswell, Jesse C.},
+  title         = {Zero-Execution Retrieval-Augmented Configuration Tuning of
+                   {Spark} Applications},
+  year          = {2025},
+  eprint        = {2503.03826},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.DB},
+  doi           = {10.48550/arXiv.2503.03826}
+}
+
+% ---------- Cost models for shuffle / data movement ----------
+
+@inproceedings{siddiqui2020costmodels,
+  author    = {Siddiqui, Tarique and Jindal, Alekh and Qiao, Shi and
+               Patel, Hiren and Le, Wangchao},
+  title     = {Cost Models for Big Data Query Processing: Learning,
+               Retrofitting, and Our Findings},
+  booktitle = {Proceedings of the 2020 {ACM} {SIGMOD} International Conference
+               on Management of Data ({SIGMOD} '20)},
+  pages     = {99--113},
+  year      = {2020},
+  publisher = {{ACM}},
+  doi       = {10.1145/3318464.3380584}
+}
+
+@inproceedings{zhou2010scopeopt,
+  author    = {Zhou, Jingren and Larson, Per-{\AA}ke and Chaiken, Ronnie},
+  title     = {Incorporating Partitioning and Parallel Plans into the {SCOPE}
+               Optimizer},
+  booktitle = {Proceedings of the 26th {IEEE} International Conference on Data
+               Engineering ({ICDE} 2010)},
+  pages     = {1060--1071},
+  year      = {2010},
+  publisher = {{IEEE}},
+  doi       = {10.1109/ICDE.2010.5447802}
+}
+
+@article{shen2020magnet,
+  author    = {Shen, Min and Zhou, Ye and Singh, Chandni},
+  title     = {{Magnet}: Push-Based Shuffle Service for Large-Scale Data
+               Processing},
+  journal   = {Proceedings of the {VLDB} Endowment},
+  volume    = {13},
+  number    = {12},
+  pages     = {3382--3395},
+  year      = {2020},
+  doi       = {10.14778/3415478.3415558}
+}
+
+@article{leis2021costoptimal,
+  author    = {Leis, Viktor and Kuschewski, Maximilian},
+  title     = {Towards Cost-Optimal Query Processing in the Cloud},
+  journal   = {Proceedings of the {VLDB} Endowment},
+  volume    = {14},
+  number    = {9},
+  pages     = {1606--1612},
+  year      = {2021},
+  doi       = {10.14778/3461535.3461549}
+}
+
+% ---------- Skew in production big-data systems ----------
+
+@article{chaiken2008scope,
+  author    = {Chaiken, Ronnie and Jenkins, Bob and Larson, Per-{\AA}ke and
+               Ramsey, Bill and Shakib, Darren and Weaver, Simon and
+               Zhou, Jingren},
+  title     = {{SCOPE}: Easy and Efficient Parallel Processing of Massive Data
+               Sets},
+  journal   = {Proceedings of the {VLDB} Endowment},
+  volume    = {1},
+  number    = {2},
+  pages     = {1265--1276},
+  year      = {2008},
+  doi       = {10.14778/1454159.1454166}
+}
+
+@inproceedings{ananthanarayanan2010mantri,
+  author    = {Ananthanarayanan, Ganesh and Kandula, Srikanth and
+               Greenberg, Albert and Stoica, Ion and Lu, Yi and Saha, Bikas and
+               Harris, Edward},
+  title     = {Reining in the Outliers in {Map-Reduce} Clusters Using {Mantri}},
+  booktitle = {Proceedings of the 9th {USENIX} Symposium on Operating Systems
+               Design and Implementation ({OSDI} '10)},
+  pages     = {265--278},
+  year      = {2010},
+  publisher = {{USENIX} Association},
+  url       = {http://www.usenix.org/events/osdi10/tech/full_papers/Ananthanarayanan.pdf}
+}
+
+% ---------- Lakehouse / cloud data platforms ----------
+
+@article{armbrust2020delta,
+  author    = {Armbrust, Michael and Das, Tathagata and Paranjpye, Sameer and
+               Xin, Reynold and Zhu, Shixiong and Ghodsi, Ali and
+               Yavuz, Burak and Murthy, Mukul and Torres, Joseph and
+               Sun, Liwen and Boncz, Peter and Mokhtar, Mostafa and
+               van Hovell, Herman and Ionescu, Adrian and
+               Luszczak, Alicja and Switakowski, Michal and Ueshin, Takuya and
+               Li, Xiao and Szafranski, Michal and Senster, Pieter and
+               Zaharia, Matei},
+  title     = {{Delta Lake}: High-Performance {ACID} Table Storage over Cloud
+               Object Stores},
+  journal   = {Proceedings of the {VLDB} Endowment},
+  volume    = {13},
+  number    = {12},
+  pages     = {3411--3424},
+  year      = {2020},
+  doi       = {10.14778/3415478.3415560}
+}
+
+@article{camacho2024lstbench,
+  author    = {Camacho-Rodr{\'i}guez, Jes{\'u}s and Agrawal, Ashvin and
+               Gruenheid, Anja and Gosalia, Ashit and Petculescu, Cristian and
+               Aguilar-Saborit, Josep and Floratou, Avrilia and Curino, Carlo
+               and Ramakrishnan, Raghu},
+  title     = {{LST-Bench}: Benchmarking Log-Structured Tables in the Cloud},
+  journal   = {Proceedings of the {ACM} on Management of Data},
+  volume    = {2},
+  number    = {1},
+  pages     = {59:1--59:26},
+  year      = {2024},
+  doi       = {10.1145/3639314},
+  eprint        = {2305.01120},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.DB}
+}
+
+@article{harby2024lakehouse,
+  author    = {Harby, Ahmed A. and Zulkernine, Farhana},
+  title     = {Data Lakehouse: A Survey and Experimental Study},
+  journal   = {Information Systems},
+  volume    = {127},
+  pages     = {102460},
+  year      = {2025},
+  doi       = {10.1016/j.is.2024.102460}
+}
+
+@inproceedings{chandra2025unity,
+  author    = {Chandra, Ramesh and Chen, Haogang and Matharu, Ray and
+               Cai, Sarah and Chen, Jeff and Dutta, Priyam and Ghita, Bogdan
+               and Greenstein, Todd and Holla, Gopal and Huang, Peng and
+               Huo, Yuchen and Ionescu, Adrian and Ispas, Adriana and
+               Januschowski, Tim and Karajgaonkar, Vihang and
+               Leone, Stefania and Lewis, David and Li, Andrew and Li, Nong
+               and Lian, Cheng and Link, Stephen and Lu, Qing and Ma, Yesheng
+               and Pettitt, Chris and Prabhakaran, Vijayan and
+               Raducanu, Bogdan and Rong, Kyle and Roome, Paul and
+               Shetty, Samarth and Smith, Sean and Sun, Xiaotong and
+               Tang, Yuyuan and Wen, Weitao and Xia, Lei and Zeng, Junlin and
+               Zhang, Ben and Xin, Reynold and Zaharia, Matei},
+  title     = {{Unity Catalog}: Open and Universal Governance for the Lakehouse
+               and Beyond},
+  booktitle = {Companion of the 2025 International Conference on Management of
+               Data ({SIGMOD/PODS} '25)},
+  pages     = {310--322},
+  year      = {2025},
+  publisher = {{ACM}},
+  doi       = {10.1145/3722212.3724459}
+}
+
+@misc{nurdin2026lakehouseperf,
+  author        = {Nurdin, James and Liu, Wei and McCreadie, Richard and
+                   Thamsen, Lauritz},
+  title         = {Predicting Lakehouse Performance in Clouds: An Empirical
+                   Exploration of Query Runtime Variance},
+  year          = {2026},
+  eprint        = {2606.03464},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.DC},
+  doi           = {10.48550/arXiv.2606.03464},
+  note          = {To appear in the Proceedings of the 19th {IEEE}
+                   International Conference on Cloud Computing ({CLOUD})}
+}
+
+% ---------- Cloud resource efficiency ----------
+
+@inproceedings{will2024autoscaling,
+  author    = {Will, Jonathan and Treide, Nico and Thamsen, Lauritz and
+               Kao, Odej},
+  title     = {Experimentally Evaluating the Resource Efficiency of Big Data
+               Autoscaling},
+  booktitle = {Proceedings of the 2024 {IEEE} International Conference on Big
+               Data ({BigData})},
+  pages     = {3825--3830},
+  year      = {2024},
+  publisher = {{IEEE}},
+  doi       = {10.1109/BigData62323.2024.10825367},
+  eprint        = {2501.14456},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.DC}
+}
+
+@inproceedings{bodner2024serverless,
+  author    = {Bodner, Thomas and Radig, Theo and Justen, David and
+               Ritter, Daniel and Rabl, Tilmann},
+  title     = {An Empirical Evaluation of Serverless Cloud Infrastructure for
+               Large-Scale Data Processing},
+  booktitle = {Proceedings of the 28th International Conference on Extending
+               Database Technology ({EDBT} 2025)},
+  pages     = {935--948},
+  year      = {2025},
+  publisher = {OpenProceedings.org},
+  doi       = {10.48786/edbt.2025.76},
+  eprint        = {2501.07771},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.DB}
+}
+
+% ---------- Case-study dataset ----------
+
+@inproceedings{saxena2008cmapss,
+  author    = {Saxena, Abhinav and Goebel, Kai and Simon, Don and
+               Eklund, Neil},
+  title     = {Damage Propagation Modeling for Aircraft Engine Run-to-Failure
+               Simulation},
+  booktitle = {Proceedings of the 2008 International Conference on Prognostics
+               and Health Management ({PHM} 2008)},
+  pages     = {1--9},
+  year      = {2008},
+  publisher = {{IEEE}},
+  address   = {Denver, CO, USA},
+  doi       = {10.1109/PHM.2008.4711414}
+}
+
+% ---------- Benchmarks, generators and vendor documentation ----------
+
+@misc{tpch,
+  author       = {{Transaction Processing Performance Council}},
+  title        = {{TPC} {Benchmark}\texttrademark{} {H} (Decision Support)
+                  Standard Specification, Revision 3.0.1},
+  year         = {2022},
+  howpublished = {\url{https://www.tpc.org/tpc_documents_current_versions/pdf/tpc-h_v3.0.1.pdf}},
+  note         = {Revision date 28 April 2022. Accessed 18 August 2026}
+}
+
+@misc{microsoft_skewgen,
+  author       = {{Microsoft}},
+  title        = {Program for {TPC-H} Data Generation with Skew},
+  howpublished = {\url{https://www.microsoft.com/en-us/download/details.aspx?id=52430}},
+  note         = {Microsoft Download Center; \texttt{TPCDSkew.zip}.
+                  Accessed 18 August 2026}
+}
+
+@misc{databricks_aqe,
+  author       = {Fan, Wenchen and van H{\"o}vell, Herman and Xue, MaryAnn},
+  title        = {Adaptive Query Execution: Speeding Up {Spark SQL} at Runtime},
+  year         = {2020},
+  month        = may,
+  howpublished = {Databricks Engineering Blog,
+                  \url{https://www.databricks.com/blog/2020/05/29/adaptive-query-execution-speeding-up-spark-sql-at-runtime.html}},
+  note         = {Published 29 May 2020. Accessed 18 August 2026}
+}
+
+@misc{spark_aqe_docs,
+  author       = {{Apache Spark}},
+  title        = {Performance Tuning --- {Spark SQL} Guide: Adaptive Query
+                  Execution and Optimizing Skew Join},
+  howpublished = {\url{https://spark.apache.org/docs/latest/sql-performance-tuning.html}},
+  note         = {Apache Spark official documentation. Accessed 18 August 2026}
+}

@@ -1,0 +1,102 @@
+\section{Background and Related Work}
+\label{sec:background}
+
+\subsection{Skew in parallel joins}
+
+Skew in parallel joins is old and well understood in the abstract. Walton et
+al.~\cite{walton1991taxonomy} gave a taxonomy and performance model of skew
+effects; DeWitt et al.~\cite{dewitt1992skew} proposed practical handling
+including range partitioning with subset replication for heavy keys --- the
+direct ancestor of what practitioners now call salting. In the MapReduce era,
+SkewTune~\cite{kwon2012skewtune, kwon2012skewtunedemo} repartitioned a
+straggler's remaining input at runtime, and Mantri~\cite{ananthanarayanan2010mantri}
+established at production scale that outlier tasks dominate job latency.
+
+A substantial line of work proposes new partitioners. For Spark specifically:
+intermediate-data partitioning for skew mitigation~\cite{tang2021intermediate}
+and skew-resilient adaptive parallel processing~\cite{shen2020srspark}. In the
+MapReduce lineage from which these descend: sampling-based and cost-aware
+partitioning schemes~\cite{myung2016handling, gufler2011skew}. Irandoost et
+al.~\cite{irandoost2019skewslr} survey the MapReduce field systematically.
+Their review discusses neither Adaptive Query Execution nor salting --- fairly
+enough for AQE, which shipped in Spark 3.0 after that review was written, but
+the omission is indicative: the literature has been optimising the mechanism
+while the question of \emph{selecting} among deployed mechanisms went unasked.
+
+Metwally's work on scaling and load-balancing equi-joins~\cite{metwally2025amjoin}
+is the closest formal treatment of the idea salting embodies. AM-Join combines
+randomised key expansion with replication on the opposite side and analyses
+doubly-skewed keys as the hard case. It is the right formal ancestor to cite,
+and it is not a study of the technique practitioners actually run.
+
+\subsection{Adaptive Query Execution}
+
+AQE re-optimises between stages using runtime statistics: coalescing
+post-shuffle partitions, converting sort-merge joins to broadcast joins when
+the observed side turns out small, and splitting skewed
+partitions~\cite{databricks_aqe, spark_aqe_docs}. Xue et
+al.~\cite{xue2024adaptive} describe the production descendant of this machinery
+at lakehouse scale and state its skew handling explicitly: the rule discovers
+skew on the join keys of a shuffled hash join, ``which manifests as a few
+partitions containing significantly more data than others,'' and eliminates it
+by ``logically splitting those large, consumer-side partitions into smaller,
+more balanced partitions.''
+
+That paper is peer-reviewed, and it is the authoritative account of the
+mechanism. It is also a systems-description paper written by the vendor and
+evaluated on the vendor's engine. What it does not provide --- and what does not
+exist elsewhere --- is an independent, controlled evaluation of the open-source
+rule against the alternative practitioners actually reach for.
+
+Adjacent work confirms the shape of the gap rather than filling it. Learned and
+adaptive Spark optimisers --- AQORA~\cite{he2025aqora},
+LOCAT~\cite{xin2022locat}, fine-grained parameter tuning~\cite{lyu2024sparkopt},
+zero-execution configuration tuning~\cite{suri2025zeroexec} --- address join
+ordering, broadcast selection and configuration knobs. AQORA operates
+\emph{inside} the AQE framework and does not address skew. Zhang et
+al.~\cite{zhang2023adaptive} evaluate adaptive query processing rigorously, but
+on single-node relational engines rather than Spark.
+
+\subsection{The specific absence}
+
+We searched dblp, the arXiv full-metadata API, Crossref, and domain-scoped
+searches over the ACM Digital Library, IEEE Xplore, the VLDB proceedings,
+Springer, ScienceDirect and MDPI. Two negative results are load-bearing for
+this paper, and we state them with their limits.
+
+\textbf{No independent evaluation of Spark's skew-join rule.} We found no
+peer-reviewed paper whose contribution is an evaluation of
+\texttt{spark.sql.adaptive.skewJoin}. The nearest comparative study, Phan et
+al.~\cite{phan2022skewjoin}, compares hash-based, range-based and
+multi-dimensional range partitioning on MapReduce and Spark --- and does not
+consider AQE. The mechanism is otherwise documented only in vendor
+material~\cite{databricks_aqe, spark_aqe_docs} and described from the
+provider's perspective~\cite{xue2024adaptive}.
+
+\textbf{No peer-reviewed treatment of salting.} A full-metadata arXiv search
+for \texttt{abs:salting AND abs:join} returns five papers, all in
+condensed-matter physics and astronomy. Searches for ``key salting'' and
+``salted join'' across the major publisher databases return only unrelated
+hash-join work. Every source describing the technique as practitioners apply it
+is a blog post, a tutorial, or vendor documentation. Its formal analogue is
+randomised key expansion with replication~\cite{metwally2025amjoin,
+dewitt1992skew}, never under that name and never as the object of study.
+
+We note the limits of this claim. Semantic Scholar and OpenAlex were
+unavailable during our search, so recall rests on dblp, arXiv, Crossref and
+domain-scoped web search, and dblp's coverage of some journals is imperfect ---
+Phan et al. is itself not indexed there. We therefore claim these absences as
+strong evidence rather than as proof.
+
+\subsection{Cost models and benchmarking practice}
+
+Cost modelling for big-data query processing is well
+developed~\cite{siddiqui2020costmodels, zhou2010scopeopt, leis2021costoptimal},
+including for shuffle specifically~\cite{shen2020magnet}, but we are not aware
+of a cost model for the salting decision. Methodologically we follow
+LST-Bench~\cite{camacho2024lstbench} in building the benchmark from composable,
+declared workload patterns, and Nurdin et al.~\cite{nurdin2026lakehouseperf} in
+treating runtime variance as a first-class threat: they measure roughly
+twofold run-to-run variation for identical lakehouse queries on shared cloud
+compute, which is precisely why our timed measurements are taken on dedicated
+local compute and our transferable claims rest on deterministic counters.

@@ -1,0 +1,65 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+Spark ships an automatic remedy for skewed joins, and practitioners continue to
+salt by hand. We set out to determine which they should use, and how much salt
+to use when salting. The answer on our workload was blunter than expected:
+Spark's skew-join rule never engaged at all, so there was nothing to choose
+between.
+
+The measurement is a null result and we report it as one. Enabling AQE on a
+join whose longest task ran \BaseMaxTaskThick~s produced a longest task of
+\AqeCoalMaxTaskThick~s, with speedups of \AqeSpeedupMid$\times$ and
+\AqeSpeedupThick$\times$ against measurement floors of 0.1\% and 6.5\%. A
+paired control with coalescing disabled shows that what little AQE contributed
+was partition merging, which lowers fixed overhead and does nothing for a
+straggler. Selective salting, on the same workload, cut the critical path
+\SaltTaskCutThick$\times$.
+
+The cause is a precondition that is documented and almost never discussed. A
+skewed partition is split into pieces of \texttt{advisoryPartitionSizeInBytes};
+a hot partition smaller than that size cannot be split at all, and the rule
+becomes a no-op however extreme the skew. Our hot partition measured
+\MeasHotMB~MB against a 16~MB advisory size. Sweeping the two parameters whose
+names contain the word \emph{skew} to their most permissive settings changed
+nothing; lowering the advisory size engaged the rule immediately. Practitioners
+tune the two knobs that are named for the problem, and the one that gates the
+solution at moderate data volumes is not among them.
+
+On the cost model we are more circumspect than we expected to be. The
+replication term is confirmed exactly in shuffle records --- \SelRecSlope{}
+rows per salt value for selective salting against \UnifRecSlope{} for uniform,
+a ratio of \RecSlopeRatio{} matching the predicted $M/P$ with $R^{2}=1.000$.
+Its consequence for runtime is not confirmed: the replication coefficient is
+statistically unidentified in all \NumFits{} fits, and in \NumNegativeB{} of
+them it comes out with the wrong sign. At this scale replication cost is not
+merely unresolved in wall-clock; it is absent. We therefore present the closed
+form $k^{*}=\sqrt{\gamma H/P}$ as theory, state plainly that this study does
+not validate it, and release the cluster configuration under which the
+prediction --- that network shuffle raises the coefficient and lowers $k^{*}$
+--- becomes testable.
+
+The decision between mechanisms turns on a statistic that costs one sampled
+group-by to obtain. When skew is one-sided and above AQE's trigger, AQE alone
+suffices and manual salting adds replication for little gain. When the same key
+is heavy on both sides, split-and-replicate degenerates and salting remains
+necessary. When the hot partition sits below AQE's absolute threshold, the rule
+does nothing at all --- silently --- and a practitioner who has enabled AQE
+believes the problem is handled.
+
+The artifact matters as much as the result. We cannot out-scale the
+organisations whose systems papers describe this machinery at production
+volume, and we do not try. What a practitioner-built harness can contribute is
+specification: a public, reproducible generator with a declared skew taxonomy,
+a metrics layer that separates deterministic counters from machine-dependent
+timings, and an honest account of what a single node does and does not license.
+\textsc{skewbench} is released under the MIT licence.
+
+Three directions follow. The most useful is validation at cluster scale, where
+the network shuffle makes $b$ larger and $k^{*}$ correspondingly smaller than
+we report; our prediction is directional and testable. The second is to fold
+$\gamma$ estimation into the engine, so that $k^{*}$ is computed rather than
+configured --- salting is currently the one skew remedy Spark cannot apply for
+you, and the model here is simple enough to be a planner rule. The third is to
+extend the taxonomy: multi-key joins, outer joins, and skew that drifts over
+time are all common in production and none is covered here.

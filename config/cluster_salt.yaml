@@ -1,0 +1,41 @@
+# Cluster grid, part 1 of 2: the salt-cardinality question.
+#
+# This is the file that tests the paper's one unconfirmed prediction -- that
+# the optimal salt cardinality k* falls as 1/sqrt(P), and that k* is SMALLER
+# on a cluster than on a single node.
+#
+# Why a cluster can settle it and a laptop cannot. The replication coefficient
+# b is the cost of moving one replicated probe-side row through the shuffle. On
+# a single host that is a write to local disk and a read back. On a cluster it
+# crosses the network. b should therefore be materially larger, the replication
+# term should become visible against the straggler term, and the convex minimum
+# should appear at a smaller k. On our single node the term was real but too
+# small to resolve -- see the paper's Section VII.
+#
+# Only ONE Spark profile appears here, with AQE off. That is deliberate: the
+# salt cost curve is a statement about salting, and mixing AQE into the same
+# file would triple the cost for cells the curve does not use. The AQE question
+# gets its own file, with its own baseline, so that neither file ever has to
+# compare a timing against a run from a different Spark session.
+#
+# 4 workloads x 1 profile x 11 arm-k cells = 44 cells.
+repetitions: 5
+warmup: 1
+
+workloads:
+  # Probe-side thickness sweep at cluster scale. P = 10, 100, 320, 1000.
+  - {n_fact: 60000000, n_dim: 600000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 1,    hot_keys: 1, n_sensors: 21, seed: 20260818}
+  - {n_fact: 60000000, n_dim: 600000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 10,   hot_keys: 1, n_sensors: 21, seed: 20260818}
+  - {n_fact: 60000000, n_dim: 600000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 32,   hot_keys: 1, n_sensors: 21, seed: 20260818}
+  - {n_fact: 60000000, n_dim: 600000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 100,  hot_keys: 1, n_sensors: 21, seed: 20260818}
+
+spark:
+  # Shuffle partitions and advisory size are Spark's own defaults here, NOT the
+  # harness defaults, so the conditions are those a practitioner would meet in
+  # production.
+  - {master: "databricks", driver_memory: "8g", shuffle_partitions: 200, aqe_enabled: false, autobroadcast_threshold: -1, advisory_partition_size: "64MB", skewed_partition_threshold: "256MB", skewed_partition_factor: 5}
+
+arms:
+  - {name: baseline,       k: [1]}
+  - {name: salt_selective, k: [1, 2, 4, 8, 16, 32, 64]}
+  - {name: salt_uniform,   k: [2, 8, 32]}

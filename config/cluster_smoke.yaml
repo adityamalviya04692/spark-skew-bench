@@ -1,0 +1,20 @@
+# Smoke test. Not a scientific config -- its only job is to prove, in a few
+# minutes and for a few rupees, that every moving part works on the cluster:
+# the Spark data generator, the arms, the event-log parser, and the writer.
+#
+# One tenth the fact rows of the real grid, one Spark profile, three arms,
+# one repetition. If this produces a JSONL with metrics_found true on every
+# row, the full grid will run. If it does not, nothing is lost.
+repetitions: 1
+warmup: 0
+
+workloads:
+  - {n_fact: 6000000, n_dim: 60000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 21, seed: 20260818}
+
+spark:
+  - {master: "databricks", driver_memory: "8g", shuffle_partitions: 200, aqe_enabled: false, autobroadcast_threshold: -1, advisory_partition_size: "64MB", skewed_partition_threshold: "256MB", skewed_partition_factor: 5}
+
+arms:
+  - {name: baseline,       k: [1]}
+  - {name: salt_selective, k: [8]}
+  - {name: salt_uniform,   k: [8]}

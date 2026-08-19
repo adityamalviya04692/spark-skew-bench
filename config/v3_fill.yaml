@@ -1,0 +1,24 @@
+# Gap-fill grid.
+#
+# Four cells of the core grid lost their event logs when an interrupted run's
+# log directory was cleared on relaunch. Their timing rows survived but their
+# metrics did not, so they were removed rather than reported without metrics --
+# a partially-measured cell is worse than an absent one, because it looks
+# complete. This config re-runs them.
+#
+# It re-runs a few cells that already succeeded as well; duplicates are dropped
+# on merge by run_id. That is cheaper and less error-prone than hand-specifying
+# a cell list, and the run_id makes the deduplication exact.
+repetitions: 5
+warmup: 1
+
+workloads:
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 1,  hot_keys: 1, n_sensors: 12, seed: 20260818}
+  - {n_fact: 2000000, n_dim: 20000, n_engines: 2000, theta: 1.2, hot_dim_multiplier: 10, hot_keys: 1, n_sensors: 12, seed: 20260818}
+
+spark:
+  - {master: "local[2]", driver_memory: "4g", shuffle_partitions: 16, aqe_enabled: false, autobroadcast_threshold: -1, advisory_partition_size: "16MB", skewed_partition_threshold: "8MB", skewed_partition_factor: 5}
+
+arms:
+  - {name: broadcast,      k: [1]}
+  - {name: salt_selective, k: [1, 4, 8]}
