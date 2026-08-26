@@ -253,15 +253,26 @@ def _group_of(props: Dict[str, Any]) -> str:
     a comma-separated list that also carries tags the platform sets for its own
     purposes. Only our own prefixed tag identifies a measurement, so the others
     are discarded rather than guessed at.
+
+    Precedence matters here; see the comment below.
     """
-    group = props.get("spark.jobGroup.id")
-    if group:
-        return group
+    # OUR tag is checked FIRST, and this ordering is the whole point.
+    #
+    # Databricks sets ``spark.jobGroup.id`` itself, to an internal value of the
+    # form <epoch>_<n>_<hex>. An earlier revision read that property first, so
+    # on Databricks every job resolved to a platform id and our own tag was
+    # never consulted -- the parse "succeeded", reported job groups, and
+    # matched none of them to a results row. Reading our own marker first is
+    # correct on both platforms: on a classic session we own
+    # ``spark.jobGroup.id`` and set no tags, so the fallback below is what runs.
     raw = props.get("spark.job.tags") or ""
     for tag in raw.split(","):
         tag = tag.strip()
         if tag.startswith(SKEWBENCH_TAG_PREFIX):
             return tag[len(SKEWBENCH_TAG_PREFIX):]
+    group = props.get("spark.jobGroup.id")
+    if group:
+        return group
     return "ungrouped"
 
 
