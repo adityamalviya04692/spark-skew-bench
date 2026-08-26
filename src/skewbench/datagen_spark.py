@@ -158,7 +158,15 @@ def generate(spec: WorkloadSpec, root: str, spark: SparkSession | None = None,
     # The earlier version wrapped this in a bare except that re-raised only when
     # NOT overwriting -- which silently swallowed every genuine failure on an
     # overwrite, leaving an empty directory and a confusing schema error later.
-    mode = "overwrite" if overwrite else "errorifexists"
+    #
+    # The mode string must be "error", not its documented alias
+    # "errorifexists". DataFrameWriter.mode's docstring lists both, and the
+    # classic writer accepts both -- but Spark Connect's plan builder matches
+    # on "append" / "overwrite" / "error" / "ignore" only, and raises
+    # [UNSUPPORTED_OPERATION] for anything else. Databricks Standard access
+    # mode and Serverless are Connect sessions, so the alias fails there and
+    # only there: it works on a laptop and dies on the cluster.
+    mode = "overwrite" if overwrite else "error"
     already_present = False
     if not overwrite:
         try:
