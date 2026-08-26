@@ -597,10 +597,22 @@ def run_grid(specs: List[RunSpec], data_root: str | Path, out_path: str | Path,
         # grid finishes. Timing rows are complete and written; metrics are
         # attached afterwards with analysis/reparse.py once delivery lands.
         if progress:
-            print("[managed platform] timing rows written without metrics.\n"
-                  "  Wait ~5 minutes after the cluster finishes, then run:\n"
-                  "    python analysis/reparse.py <results.jsonl> "
-                  "<log-volume>/<cluster-id>/eventlog", flush=True)
+            cluster_id = ""
+            try:
+                cluster_id = spark.conf.get(
+                    "spark.databricks.clusterUsageTags.clusterId", "")
+            except Exception:  # noqa: BLE001
+                pass
+            print("[managed platform] timing rows written WITHOUT metrics.\n"
+                  "  This is expected: Databricks delivers event logs "
+                  "asynchronously, roughly every 5 minutes, so they are not\n"
+                  "  readable at the moment the grid finishes. Wait for "
+                  "delivery, then attach metrics with:\n"
+                  f"    python analysis/reparse.py {out_path} "
+                  f"<log-destination>/{cluster_id or '<cluster-id>'}\n"
+                  "  Until that runs, metrics_found is absent on every row -- "
+                  "which is not the same as the metrics being lost.",
+                  flush=True)
     else:
         rows = attach_metrics(rows, event_log_dir)
     with open(out_path, "w", encoding="utf-8") as handle:
