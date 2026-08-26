@@ -224,6 +224,31 @@ def iter_events(log_path: str | Path) -> Iterable[Dict[str, Any]]:
                 continue  # partially flushed tail
 
 
+SKEWBENCH_TAG_PREFIX = "skewbench:"
+
+
+def _group_of(props: Dict[str, Any]) -> str:
+    """Recover the run group a Spark job belongs to, from either mechanism.
+
+    A classic session writes ``spark.jobGroup.id``. A Spark Connect session --
+    which is what Databricks Standard access mode and Serverless give you,
+    because they withhold ``sparkContext`` -- writes ``spark.job.tags`` instead,
+    a comma-separated list that also carries tags the platform sets for its own
+    purposes. Only our own prefixed tag identifies a measurement, so the others
+    are discarded rather than guessed at.
+    """
+    group = props.get("spark.jobGroup.id")
+    if group:
+        return group
+    raw = props.get("spark.job.tags") or ""
+    for tag in raw.split(","):
+        tag = tag.strip()
+        if tag.startswith(SKEWBENCH_TAG_PREFIX):
+            return tag[len(SKEWBENCH_TAG_PREFIX):]
+    return "ungrouped"
+
+
+
 def parse_event_log(log_path: str | Path) -> Dict[str, RunMetrics]:
     """Group an event log by Spark job group and reduce each group to metrics.
 
@@ -241,7 +266,7 @@ def parse_event_log(log_path: str | Path) -> Dict[str, RunMetrics]:
         if kind == JOB_START:
             job_id = _num(event.get("Job ID"))
             props = event.get("Properties") or {}
-            group = props.get("spark.jobGroup.id") or "ungrouped"
+            group = _group_of(props)
             job_group_of_job[job_id] = group
             stages_of_job[job_id] = [_num(s) for s in event.get("Stage IDs", [])]
             job_bounds[job_id][0] = _num(event.get("Submission Time"))

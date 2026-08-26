@@ -96,6 +96,120 @@ def on_managed_platform() -> bool:
                ("DATABRICKS_RUNTIME_VERSION", "DB_HOME", "DATABRICKS_HOST"))
 
 
+# --- job attribution ------------------------------------------------------
+#
+# Every repetition must be traceable from a results row back to the exact Spark
+# tasks that produced it. Two mechanisms exist and which one is available is a
+# property of the cluster, not of the code:
+#
+#   * ``sparkContext.setJobGroup`` on a classic session. Writes the
+#     ``spark.jobGroup.id`` job property.
+#   * ``SparkSession.addTag`` on a Spark Connect session -- which is what
+#     Databricks Standard (formerly Shared) access mode and Serverless both
+#     give you, because they withhold ``sparkContext`` entirely. Writes the
+#     ``spark.job.tags`` job property.
+#
+# Both land in the event log, so the parser reads either. What must never
+# happen is the third case: neither mechanism available and the failure passing
+# silently. A run in that state completes, writes timings, and contains no
+# task-level evidence at all -- no straggler index, no shuffle skew, no proof
+# that AQE fired. It looks finished and is not. Hence :func:`require_job_tagging`,
+# which is called once at session setup and refuses to continue.
+
+TAG_PREFIX = "skewbench:"
+
+
+def _connect_tagging(spark: SparkSession) -> bool:
+    return hasattr(spark, "addTag") and hasattr(spark, "clearTags")
+
+
+def _classic_tagging(spark: SparkSession) -> bool:
+    sc = getattr(spark, "sparkContext", None)
+    return sc is not None and hasattr(sc, "setJobGroup")
+
+
+def tagging_mechanism(spark: SparkSession) -> str:
+    """Which attribution mechanism this session supports: 'tags', 'jobgroup', or 'none'.
+
+    Connect is probed first because a session may expose ``sparkContext`` as an
+    attribute that raises on access; ``hasattr`` swallows that, so the classic
+    probe is the less trustworthy of the two.
+    """
+    if _connect_tagging(spark):
+        return "tags"
+    try:
+        if _classic_tagging(spark):
+            return "jobgroup"
+    except Exception:  # noqa: BLE001 -- attribute access itself can raise here
+        pass
+    return "none"
+
+
+def require_job_tagging(spark: SparkSession) -> str:
+    mechanism = tagging_mechanism(spark)
+    if mechanism == "none":
+        raise RuntimeError(
+            "This Spark session supports neither SparkSession.addTag nor "
+            "sparkContext.setJobGroup, so no measurement can be attributed to "
+            "the cell that produced it. The run would finish and contain no "
+            "task-level evidence. Refusing to start.\n"
+            "On Databricks, use a classic cluster on DBR 14.3+ (Standard or "
+            "Dedicated access mode both work via addTag), not an older runtime."
+        )
+    return mechanism
+
+
+def _quiet(spark: SparkSession) -> None:
+    """Silence Spark's INFO chatter where the API for doing so exists.
+
+    Cosmetic only. A Connect session has no ``sparkContext`` to set it on, and
+    a noisy log is not a reason to abort a run -- unlike missing job tagging,
+    which is.
+    """
+    try:
+        spark.sparkContext.setLogLevel("ERROR")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def session_identity(spark: SparkSession) -> str:
+    """A stable id for THIS Spark session.
+
+    Wall-clock is only comparable within one session: JIT state, cache warmth
+    and executor placement all differ across sessions, and comparing across
+    them once inflated this study's noise floor from 2% to 29%. Every results
+    row carries this so the analysis can refuse such a comparison rather than
+    silently make it.
+    """
+    try:
+        return spark.sparkContext.applicationId
+    except Exception:  # noqa: BLE001
+        client = getattr(spark, "client", None)
+        for attr in ("_session_id", "session_id"):
+            value = getattr(client, attr, None)
+            if value:
+                return str(value)
+        return "managed-session"
+
+
+def _set_job_group(spark: SparkSession, group_id: str, description: str = "") -> None:
+    """Tag every job launched from here until cleared, with ``group_id``."""
+    if _connect_tagging(spark):
+        spark.clearTags()
+        spark.addTag(TAG_PREFIX + group_id)
+        return
+    spark.sparkContext.setJobGroup(group_id, description)
+
+
+def _clear_job_group(spark: SparkSession) -> None:
+    if _connect_tagging(spark):
+        spark.clearTags()
+        return
+    # PySpark exposes no clearJobGroup(); unset the local property directly.
+    spark.sparkContext.setLocalProperty("spark.jobGroup.id", None)
+
+
+
 def build_session(spec: SparkSpec, event_log_dir: Path,
                   app_name: str = "skewbench") -> SparkSession:
     """Construct the session. Only non-runtime-settable options belong here.
@@ -109,7 +223,7 @@ def build_session(spec: SparkSpec, event_log_dir: Path,
     managed = on_managed_platform()
     if managed:
         session = SparkSession.builder.appName(app_name).getOrCreate()
-        session.sparkContext.setLogLevel("ERROR")
+        _quiet(session)
         return session
 
     event_log_dir.mkdir(parents=True, exist_ok=True)
@@ -134,7 +248,7 @@ def build_session(spec: SparkSpec, event_log_dir: Path,
     if spec.local_dir:
         builder = builder.config("spark.local.dir", spec.local_dir)
     session = builder.getOrCreate()
-    session.sparkContext.setLogLevel("ERROR")
+    _quiet(session)
     return session
 
 
@@ -165,7 +279,7 @@ def execute_run(spark: SparkSession, spec: RunSpec, fact: DataFrame, dim: DataFr
 
     # Warmup executions are tagged separately so the parser can discard them.
     for w in range(spec.warmup):
-        spark.sparkContext.setJobGroup(f"{spec.run_id}::warmup{w}", "warmup")
+        _set_job_group(spark, f"{spec.run_id}::warmup{w}", "warmup")
         plan.write.format("noop").mode("overwrite").save()
 
     wall_times: List[float] = []
@@ -173,7 +287,7 @@ def execute_run(spark: SparkSession, spec: RunSpec, fact: DataFrame, dim: DataFr
     for rep in range(spec.repetitions):
         group = f"{spec.run_id}::rep{rep}"
         group_ids.append(group)
-        spark.sparkContext.setJobGroup(group, f"{spec.arm.label} rep {rep}")
+        _set_job_group(spark, group, f"{spec.arm.label} rep {rep}")
         started = time.perf_counter()
         # The noop sink forces full materialisation without writing bytes to disk
         # or shipping rows to the driver, so the measurement is of the join and
@@ -181,8 +295,7 @@ def execute_run(spark: SparkSession, spec: RunSpec, fact: DataFrame, dim: DataFr
         plan.write.format("noop").mode("overwrite").save()
         wall_times.append(time.perf_counter() - started)
 
-    # PySpark exposes no clearJobGroup(); unset the local property directly.
-    spark.sparkContext.setLocalProperty("spark.jobGroup.id", None)
+    _clear_job_group(spark)
 
     row = flatten(spec)
     row.update({
@@ -373,7 +486,10 @@ def run_grid(specs: List[RunSpec], data_root: str | Path, out_path: str | Path,
     # cold, warms differently, and may sit on a differently-loaded host. Cells
     # gap-filled from a second run were measurably and systematically slower
     # here, which is invisible unless the session is recorded.
-    session_id = spark.sparkContext.applicationId
+    mechanism = require_job_tagging(spark)
+    if progress:
+        print(f"[setup] job attribution via {mechanism}")
+    session_id = session_identity(spark)
     rows: List[Dict[str, Any]] = []
     loaded: Dict[str, Any] = {}
     seen_plan: set = set()
@@ -428,10 +544,10 @@ def run_grid(specs: List[RunSpec], data_root: str | Path, out_path: str | Path,
 
                 warm = arms_mod.build(fact, dim, _Arm("baseline"),
                                       manifest["hot_keys"])
-                spark.sparkContext.setJobGroup("session::warmup", "session warmup")
+                _set_job_group(spark, "session::warmup", "session warmup")
                 for _ in range(session_warmup):
                     warm.write.format("noop").mode("overwrite").save()
-                spark.sparkContext.setLocalProperty("spark.jobGroup.id", None)
+                _clear_job_group(spark)
 
             if spec.run_id in already_done:
                 # Carry the previously-completed row into this run's output.
@@ -471,7 +587,8 @@ def run_grid(specs: List[RunSpec], data_root: str | Path, out_path: str | Path,
             os.fsync(partial_handle.fileno())
     finally:
         partial_handle.close()
-        spark.stop()
+        if not on_managed_platform():
+            spark.stop()
         time.sleep(1.0)  # let the event log flush before it is parsed
 
     if on_managed_platform():
