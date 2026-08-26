@@ -24,6 +24,7 @@ skew produces.
 
 from __future__ import annotations
 
+import gzip
 import json
 import statistics
 from collections import defaultdict
@@ -212,16 +213,32 @@ def _stage_metrics(stage_id: int, tasks: List[TaskRecord]) -> StageMetrics:
 
 
 def iter_events(log_path: str | Path) -> Iterable[Dict[str, Any]]:
-    """Yield parsed events, tolerating a truncated final line."""
-    with open(log_path, "r", encoding="utf-8", errors="replace") as handle:
+    """Yield parsed Spark events, tolerating a truncated tail and foreign files.
+
+    Two things this must survive. A rolled event log is gzipped, so the reader
+    sniffs the magic bytes rather than trusting the extension. And Databricks
+    cluster log delivery drops stdout, stderr, log4j output and metrics files
+    into the same tree as the event log -- a line of one of those can be valid
+    JSON that is not an object (a bare integer, say), which would otherwise
+    surface as ``'int' object has no attribute 'get'`` several frames away from
+    the file that caused it. Only JSON objects are events; everything else is
+    silently not one.
+    """
+    path = Path(log_path)
+    with open(path, "rb") as probe:
+        gzipped = probe.read(2) == b"\x1f\x8b"
+    opener = gzip.open if gzipped else open
+    with opener(path, "rt", encoding="utf-8", errors="replace") as handle:
         for line in handle:
             line = line.strip()
             if not line:
                 continue
             try:
-                yield json.loads(line)
+                event = json.loads(line)
             except json.JSONDecodeError:
                 continue  # partially flushed tail
+            if isinstance(event, dict):
+                yield event
 
 
 SKEWBENCH_TAG_PREFIX = "skewbench:"
