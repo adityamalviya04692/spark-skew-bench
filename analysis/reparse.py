@@ -31,8 +31,14 @@ def main(results_path: str, log_dir: str, out_path: str | None = None) -> None:
     ]
 
     by_group: Dict[str, RunMetrics] = {}
-    logs = sorted((p for p in Path(log_dir).glob("*") if p.is_file()),
-                  key=lambda p: p.stat().st_mtime)
+    # Recursive, because Databricks cluster log delivery nests the event log
+    # several levels below the destination you configure:
+    #   <dest>/<cluster-id>/eventlog/<cluster-id>_<driver-ip>/<app-id>/eventlog
+    # A non-recursive glob at the destination finds nothing and reports zero
+    # job groups, which looks identical to "the tags never reached the log".
+    logs = sorted((q for q in Path(log_dir).rglob("*")
+                   if q.is_file() and not q.name.startswith(".")),
+                  key=lambda q: q.stat().st_mtime)
     for log in logs:
         by_group.update(parse_event_log(log))
     print(f"parsed {len(logs)} event log(s), {len(by_group)} job groups")
