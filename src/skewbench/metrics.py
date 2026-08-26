@@ -277,12 +277,21 @@ def _group_of(props: Dict[str, Any]) -> str:
 
 
 
-def parse_event_log(log_path: str | Path) -> Dict[str, RunMetrics]:
-    """Group an event log by Spark job group and reduce each group to metrics.
+def parse_event_log(log_path: str | Path,
+                    resolver: Optional[Any] = None) -> Dict[str, RunMetrics]:
+    """Group an event log by run and reduce each group to metrics.
 
-    The runner tags every measurement with a unique job-group id, so the mapping
-    from a results row back to the exact tasks that produced it is exact rather
-    than inferred from timestamps.
+    By default a job is attributed to a run by the marker the runner wrote --
+    ``spark.jobGroup.id`` on a classic session, our own ``skewbench:`` job tag
+    on a Spark Connect one. That mapping is exact.
+
+    ``resolver`` overrides it with ``f(props, submission_time_ms) -> group``.
+    That exists because Databricks propagates neither marker into the delivered
+    event log: measured on DBR 16.4, zero of 56 job starts carried a
+    ``skewbench:`` tag, and the only tag-shaped properties present were
+    ``spark.databricks.clusterUsageTags.*`` cluster metadata. Where no marker
+    survives, the caller supplies attribution by submission time instead --
+    inference rather than identity, and the analysis must say so.
     """
     job_group_of_job: Dict[int, str] = {}
     stages_of_job: Dict[int, List[int]] = {}
@@ -294,10 +303,13 @@ def parse_event_log(log_path: str | Path) -> Dict[str, RunMetrics]:
         if kind == JOB_START:
             job_id = _num(event.get("Job ID"))
             props = event.get("Properties") or {}
-            group = _group_of(props)
+            submitted = _num(event.get("Submission Time"))
+            group = resolver(props, submitted) if resolver else _group_of(props)
+            if group is None:
+                continue  # resolver disowned this job: platform overhead, not ours
             job_group_of_job[job_id] = group
             stages_of_job[job_id] = [_num(s) for s in event.get("Stage IDs", [])]
-            job_bounds[job_id][0] = _num(event.get("Submission Time"))
+            job_bounds[job_id][0] = submitted
         elif kind == JOB_END:
             job_id = _num(event.get("Job ID"))
             job_bounds[job_id][1] = _num(event.get("Completion Time"))

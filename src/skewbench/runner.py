@@ -284,16 +284,30 @@ def execute_run(spark: SparkSession, spec: RunSpec, fact: DataFrame, dim: DataFr
 
     wall_times: List[float] = []
     group_ids: List[str] = []
+    # Absolute wall-clock bounds per repetition, in epoch milliseconds, to match
+    # the units Spark writes for a job's Submission Time.
+    #
+    # These exist because on Databricks neither attribution marker survives into
+    # the delivered event log -- measured on DBR 16.4, zero of 56 job starts
+    # carried our tag. Where the marker is gone, the only thing left that ties a
+    # job to a repetition is when it ran. Repetitions execute sequentially on one
+    # driver and never overlap, so a job's submission time falls inside exactly
+    # one window; the attribution is unambiguous even though it is inferred
+    # rather than identified, and the write-up must not pretend otherwise.
+    rep_windows: List[List[int]] = []
+
     for rep in range(spec.repetitions):
         group = f"{spec.run_id}::rep{rep}"
         group_ids.append(group)
         _set_job_group(spark, group, f"{spec.arm.label} rep {rep}")
+        wall_start_ms = int(time.time() * 1000)
         started = time.perf_counter()
         # The noop sink forces full materialisation without writing bytes to disk
         # or shipping rows to the driver, so the measurement is of the join and
         # nothing else.
         plan.write.format("noop").mode("overwrite").save()
         wall_times.append(time.perf_counter() - started)
+        rep_windows.append([wall_start_ms, int(time.time() * 1000)])
 
     _clear_job_group(spark)
 
@@ -301,6 +315,7 @@ def execute_run(spark: SparkSession, spec: RunSpec, fact: DataFrame, dim: DataFr
     row.update({
         "arm_label": spec.arm.label,
         "group_ids": group_ids,
+        "rep_windows": rep_windows,
         "wall_times_s": [round(t, 4) for t in wall_times],
         "wall_median_s": round(statistics.median(wall_times), 4),
         "wall_min_s": round(min(wall_times), 4),
