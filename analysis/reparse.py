@@ -57,6 +57,34 @@ def main(results_path: str, log_dir: str, out_path: str | None = None) -> None:
         by_group.update(parse_event_log(log))
     print(f"parsed {len(logs)} event log file(s) "
           f"({skipped} non-event files skipped), {len(by_group)} job groups")
+
+    # Distinguish the two ways this can go wrong, because they look identical
+    # in the results file and have completely different fixes:
+    #   (a) our tag is in the log but the rows do not match it  -> naming
+    #   (b) our tag is not in the log at all                    -> attribution
+    from skewbench.metrics import iter_events  # noqa: E402
+    tagged = untagged = 0
+    seen_props: set = set()
+    for log in logs:
+        for event in iter_events(log):
+            if event.get("Event") != "SparkListenerJobStart":
+                continue
+            props = event.get("Properties") or {}
+            raw = props.get("spark.job.tags") or ""
+            if any(t.strip().startswith("skewbench:") for t in raw.split(",")):
+                tagged += 1
+            else:
+                untagged += 1
+                for key in props:
+                    if "tag" in key.lower() or "jobGroup" in key:
+                        seen_props.add(key)
+    print(f"  job starts carrying a skewbench: tag -> {tagged}")
+    print(f"  job starts without one             -> {untagged}")
+    if not tagged:
+        print("  NO skewbench tag reached the event log. Tag-carrying "
+              "properties actually present on job starts:")
+        for key in sorted(seen_props):
+            print(f"    {key}")
     if by_group:
         sample = sorted(by_group)[:3]
         print(f"  sample group ids: {sample}")
