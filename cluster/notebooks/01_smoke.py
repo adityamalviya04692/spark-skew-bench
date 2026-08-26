@@ -39,24 +39,88 @@ print(f"\nsmoke rows: {len(rows)}  in {elapsed_min:.1f} min")
 
 # MAGIC %md
 # MAGIC ## The only check that matters
-# MAGIC `metrics_found` false on any row means the event-log parser found nothing.
-# MAGIC The timings would still be written, and the paper's task-level claims --
-# MAGIC straggler index, shuffle read skew, whether AQE actually fired -- would
-# MAGIC all be missing. A run in that state looks complete and is not.
+# MAGIC On a managed platform the runner deliberately does NOT attach metrics
+# MAGIC inline: Databricks delivers event logs asynchronously, roughly every
+# MAGIC five minutes, so nothing is readable at the moment the grid finishes.
+# MAGIC `metrics_found` being absent right now is expected and means nothing.
+# MAGIC
+# MAGIC What has to be proved is the next link in the chain, and it is the one
+# MAGIC still unproven: preflight showed a job tag gets **set**, but not that it
+# MAGIC survives into the **event log**, which is what the parser reads. The
+# MAGIC cell below waits for delivery, runs the reparse, and checks. If tags do
+# MAGIC not reach the log, this is where it shows up -- not in the grid run.
 
 # COMMAND ----------
 
+import glob
+import os
+import subprocess
+import time
+
+# Where the platform delivers this cluster's logs. Derived, not pasted: the
+# cluster id is the folder name and getting it wrong looks exactly like
+# "delivery never happened".
+cluster_id = spark.conf.get("spark.databricks.clusterUsageTags.clusterId", "")
+LOG_ROOT = f"{VOLUME}/logs/{cluster_id}"
+print(f"cluster id   {cluster_id}")
+print(f"log root     {LOG_ROOT}")
+
+
+def event_log_files(root: str):
+    return [f for f in glob.glob(f"{root}/**/*", recursive=True)
+            if os.path.isfile(f) and "eventlog" in f and not
+            os.path.basename(f).startswith(".")]
+
+
+# Poll rather than sleep a flat five minutes: delivery is usually faster, and
+# when it is not, a fixed sleep just hides the wait.
+deadline = time.time() + 420
+found = []
+while time.time() < deadline:
+    found = event_log_files(LOG_ROOT)
+    if found:
+        break
+    print("  waiting for event-log delivery...", flush=True)
+    time.sleep(30)
+
+print(f"event log files delivered: {len(found)}")
+if not found:
+    raise SystemExit(
+        "No event logs delivered after 7 minutes. Check that cluster log "
+        "delivery is configured (Compute -> Edit -> Advanced -> Logging) and "
+        "that it was set BEFORE the cluster started -- it cannot be added "
+        "retroactively to a running cluster."
+    )
+
+# COMMAND ----------
+
+SMOKE = f"{RESULTS}/smoke.jsonl"
+out = subprocess.run(
+    [sys.executable, str(REPO / "analysis" / "reparse.py"), SMOKE, LOG_ROOT],
+    capture_output=True, text=True)
+print(out.stdout or "")
+print(out.stderr or "")
+
+# COMMAND ----------
+
+import json
+
+rows = [json.loads(l) for l in open(SMOKE) if l.strip()]
 missing = [r["arm_label"] for r in rows if not r.get("metrics_found")]
 print("cells without metrics:", missing or "none")
 for r in rows:
     print(f"  {r['arm_label']:24s} median {r['wall_median_s']:7.2f}s  "
           f"straggler {r.get('straggler_index')}  metrics {r.get('metrics_found')}")
 if missing:
-    raise SystemExit("Event-log metrics are missing. Do not start the full run.")
+    raise SystemExit(
+        "Event-log metrics are STILL missing after reparse. The job tags are "
+        "not reaching the event log, so the grid would produce timings with no "
+        "tasks attached. Do not start the full run."
+    )
+print("\nJob tags reach the event log. Metrics attach correctly.")
 
 # COMMAND ----------
 
-# MAGIC %md
 # MAGIC ## Projection
 # MAGIC Feed the smoke timings to the projector. Read the total before you start
 # MAGIC the real grid, not after.
