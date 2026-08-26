@@ -36,12 +36,30 @@ def main(results_path: str, log_dir: str, out_path: str | None = None) -> None:
     #   <dest>/<cluster-id>/eventlog/<cluster-id>_<driver-ip>/<app-id>/eventlog
     # A non-recursive glob at the destination finds nothing and reports zero
     # job groups, which looks identical to "the tags never reached the log".
-    logs = sorted((q for q in Path(log_dir).rglob("*")
-                   if q.is_file() and not q.name.startswith(".")),
-                  key=lambda q: q.stat().st_mtime)
+    # Databricks cluster log delivery drops stdout, stderr, log4j output,
+    # init-script logs and metrics files into the same tree as the event log.
+    # Feeding those to the event parser is how "0 job groups" gets produced by
+    # a run whose tagging was fine, so select rather than take everything --
+    # and say out loud what was skipped, because a silent filter that is too
+    # aggressive looks exactly like tagging that never worked.
+    candidates = sorted((q for q in Path(log_dir).rglob("*")
+                         if q.is_file() and not q.name.startswith(".")),
+                        key=lambda q: q.stat().st_mtime)
+    logs = [q for q in candidates if "eventlog" in str(q).lower()]
+    skipped = len(candidates) - len(logs)
+    if not logs:
+        raise SystemExit(
+            f"No event-log files under {log_dir} ({len(candidates)} other "
+            "files present). Cluster log delivery writes them to "
+            "<destination>/<cluster-id>/eventlog/... -- check the path."
+        )
     for log in logs:
         by_group.update(parse_event_log(log))
-    print(f"parsed {len(logs)} event log(s), {len(by_group)} job groups")
+    print(f"parsed {len(logs)} event log file(s) "
+          f"({skipped} non-event files skipped), {len(by_group)} job groups")
+    if by_group:
+        sample = sorted(by_group)[:3]
+        print(f"  sample group ids: {sample}")
 
     missing = 0
     for row in rows:
