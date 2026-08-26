@@ -120,11 +120,20 @@ try:
     execs = len(sc._jsc.sc().statusTracker().getExecutorInfos()) - 1
     check("cluster shape", execs >= 1, f"{execs} executors, {cores} default parallelism")
 except Exception:  # noqa: BLE001
-    # Expected on Standard access mode and Serverless: sc is withheld. Not a
-    # failure -- job attribution is what matters, and check 6 already covers it.
-    parallelism = spark.conf.get("spark.sql.shuffle.partitions", "unknown")
+    # Expected on Standard access mode and Serverless: the executor list is not
+    # reachable. Not a failure -- job attribution is what matters, and check 6
+    # already covers it.
+    #
+    # The default argument to spark.conf.get is NOT a fallback string: Spark
+    # type-checks it against the config's own type, so passing "unknown" for an
+    # integer config raises NumberFormatException from the JVM. Ask without a
+    # default and handle absence here instead.
+    try:
+        parallelism = spark.conf.get("spark.sql.shuffle.partitions")
+    except Exception:  # noqa: BLE001
+        parallelism = "unknown"
     check("cluster shape", True,
-          f"sparkContext withheld; shuffle partitions default {parallelism}")
+          f"executor list unavailable; shuffle partitions {parallelism}")
 
 print(f"\nsession identity: {session_identity(spark)}")
 
