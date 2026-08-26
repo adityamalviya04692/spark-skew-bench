@@ -53,6 +53,31 @@ def main(results_path: str, log_dir: str, out_path: str | None = None) -> None:
             "files present). Cluster log delivery writes them to "
             "<destination>/<cluster-id>/eventlog/... -- check the path."
         )
+    # Attribution strategy, decided by evidence rather than assumed.
+    #
+    # Preferred: the marker the runner wrote. Exact -- a job either carries the
+    # run's id or it does not. Fallback: submission time inside a repetition's
+    # recorded window. Inferred, and used only when no marker survives, which is
+    # the case on Databricks: it propagates neither spark.jobGroup.id (it
+    # overwrites that with its own internal id) nor our job tag into the
+    # delivered event log.
+    windows: List[tuple] = []
+    for row in rows:
+        for group, span in zip(row.get("group_ids", []),
+                               row.get("rep_windows", [])):
+            if isinstance(span, (list, tuple)) and len(span) == 2:
+                windows.append((int(span[0]), int(span[1]), group))
+    windows.sort()
+
+    def by_window(props: Dict[str, Any], submitted: int):
+        for start, end, group in windows:
+            # A job submitted inside a repetition belongs to it. The upper bound
+            # is generous by a second because the driver stops its timer after
+            # the last job is submitted, not after the log records it.
+            if start <= submitted <= end + 1000:
+                return group
+        return None  # platform overhead, generation, warmup: not a measurement
+
     for log in logs:
         by_group.update(parse_event_log(log))
     print(f"parsed {len(logs)} event log file(s) "
@@ -88,6 +113,23 @@ def main(results_path: str, log_dir: str, out_path: str | None = None) -> None:
     if by_group:
         sample = sorted(by_group)[:3]
         print(f"  sample group ids: {sample}")
+
+    wanted = {g for row in rows for g in row.get("group_ids", [])}
+    strategy = "marker"
+    if not (wanted & set(by_group)):
+        if not windows:
+            print("  no marker matched and no repetition windows recorded -- "
+                  "re-run the grid with a build that records rep_windows")
+        else:
+            print(f"  no marker matched; attributing by submission time across "
+                  f"{len(windows)} repetition windows instead (INFERRED)")
+            by_group = {}
+            for log in logs:
+                by_group.update(parse_event_log(log, resolver=by_window))
+            strategy = "time-window"
+            print(f"  attributed {len(by_group)} run group(s) by time window")
+    for row in rows:
+        row["attribution"] = strategy
 
     missing = 0
     for row in rows:
