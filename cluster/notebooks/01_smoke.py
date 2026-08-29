@@ -25,7 +25,10 @@ from skewbench.runner import run_grid
 specs = specs_from_config(load_config(str(REPO / "config" / "cluster_smoke.yaml")))
 print(f"{len(specs)} smoke cells")
 
-started = time.time()
+# Recorded before the grid so the wait below can tell this run's event log
+# apart from every previous run's, which stay in the destination forever.
+RUN_STARTED = time.time()
+started = RUN_STARTED
 rows = run_grid(
     specs,
     data_root=DATA_ROOT,
@@ -66,24 +69,44 @@ print(f"cluster id   {cluster_id}")
 print(f"log root     {LOG_ROOT}")
 
 
-def event_log_files(root: str):
-    return [f for f in glob.glob(f"{root}/**/*", recursive=True)
-            if os.path.isfile(f) and "eventlog" in f and not
-            os.path.basename(f).startswith(".")]
+def event_log_files(root: str, newer_than: float = 0.0):
+    """Delivered event logs, optionally only ones written after a cutoff.
 
+    The cutoff is what makes this correct. Previous sessions leave their event
+    logs in the same destination forever, so a bare existence check returns
+    immediately with stale files -- and the reparse then attributes nothing,
+    because those jobs ran days before this run's windows. That failure looks
+    identical to attribution being broken, and cost a full smoke cycle to tell
+    apart.
+    """
+    out = []
+    for f in glob.glob(f"{root}/**/*", recursive=True):
+        if not (os.path.isfile(f) and "eventlog" in f):
+            continue
+        if os.path.basename(f).startswith("."):
+            continue
+        if os.path.getmtime(f) < newer_than:
+            continue
+        out.append(f)
+    return out
+
+
+stale = event_log_files(LOG_ROOT)
+print(f"event log files already present (from earlier runs): {len(stale)}")
 
 # Poll rather than sleep a flat five minutes: delivery is usually faster, and
 # when it is not, a fixed sleep just hides the wait.
-deadline = time.time() + 420
+deadline = time.time() + 600
 found = []
 while time.time() < deadline:
-    found = event_log_files(LOG_ROOT)
+    found = event_log_files(LOG_ROOT, newer_than=RUN_STARTED)
     if found:
         break
-    print("  waiting for event-log delivery...", flush=True)
+    print(f"  waiting for THIS run's event log "
+          f"({int(deadline - time.time())}s left)...", flush=True)
     time.sleep(30)
 
-print(f"event log files delivered: {len(found)}")
+print(f"event log files delivered SINCE THIS RUN STARTED: {len(found)}")
 if not found:
     raise SystemExit(
         "No event logs delivered after 7 minutes. Check that cluster log "

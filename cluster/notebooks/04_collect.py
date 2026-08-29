@@ -22,6 +22,7 @@
 # COMMAND ----------
 
 import glob
+import json
 import os
 import subprocess
 import sys
@@ -31,15 +32,42 @@ cluster_id = spark.conf.get("spark.databricks.clusterUsageTags.clusterId", "")
 LOG_ROOT = f"{VOLUME}/logs/{cluster_id}"
 print(f"log root  {LOG_ROOT}")
 
-deadline = time.time() + 480
+# Only logs newer than the newest result row count. Previous sessions leave
+# their event logs in this destination forever, so a bare existence check
+# returns instantly with stale files and the reparse then attributes nothing --
+# a failure that looks exactly like broken attribution and is not.
+newest_run_ms = 0
+for name in ("cluster_salt", "cluster_aqe"):
+    target = f"{RESULTS}/{name}.jsonl"
+    if not os.path.exists(target):
+        continue
+    for line in open(target):
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        for span in row.get("rep_windows", []):
+            newest_run_ms = max(newest_run_ms, int(span[1]))
+cutoff = newest_run_ms / 1000 if newest_run_ms else 0
+
+
+def delivered(newer_than=0.0):
+    return [f for f in glob.glob(f"{LOG_ROOT}/**/*", recursive=True)
+            if os.path.isfile(f) and "eventlog" in f
+            and not os.path.basename(f).startswith(".")
+            and os.path.getmtime(f) >= newer_than]
+
+
+print(f"logs already present from earlier runs: {len(delivered())}")
+deadline = time.time() + 600
+found = []
 while time.time() < deadline:
-    found = [f for f in glob.glob(f"{LOG_ROOT}/**/*", recursive=True)
-             if os.path.isfile(f) and "eventlog" in f]
+    found = delivered(cutoff)
     if found:
         break
-    print("  waiting for event-log delivery...", flush=True)
+    print(f"  waiting for THIS run's event log "
+          f"({int(deadline - time.time())}s left)...", flush=True)
     time.sleep(30)
-print(f"event log files delivered: {len(found)}")
+print(f"event log files covering this run: {len(found)}")
 
 for name in ("cluster_salt", "cluster_aqe"):
     target = f"{RESULTS}/{name}.jsonl"
