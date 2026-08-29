@@ -110,7 +110,8 @@ missing = [r["arm_label"] for r in rows if not r.get("metrics_found")]
 print("cells without metrics:", missing or "none")
 for r in rows:
     print(f"  {r['arm_label']:24s} median {r['wall_median_s']:7.2f}s  "
-          f"straggler {r.get('straggler_index')}  metrics {r.get('metrics_found')}")
+          f"straggler {r.get('join_straggler_index')}  "
+          f"tasks {r.get('n_tasks')}  metrics {r.get('metrics_found')}")
 if missing:
     raise SystemExit(
         "Event-log metrics are STILL missing after reparse. The job tags are "
