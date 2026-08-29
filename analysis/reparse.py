@@ -141,6 +141,35 @@ def main(results_path: str, log_dir: str, out_path: str | None = None) -> None:
                 by_group.update(parse_event_log(log, resolver=by_window))
             strategy = "time-window"
             print(f"  attributed {len(by_group)} run group(s) by time window")
+            if not by_group:
+                # Zero attributed means the jobs in these logs and the windows in
+                # these results do not overlap in time at all. Almost always that
+                # is stale logs -- a previous session's event log is still in the
+                # destination and the current run's has not been delivered yet.
+                # Print both spans so the mismatch is visible rather than
+                # something to be reverse-engineered from job-group ids.
+                import datetime as _dt
+
+                def _stamp(ms):
+                    return _dt.datetime.utcfromtimestamp(ms / 1000).strftime(
+                        "%Y-%m-%d %H:%M:%S UTC")
+
+                seen = []
+                for log in logs:
+                    for event in iter_events(log):
+                        if event.get("Event") == "SparkListenerJobStart":
+                            t = event.get("Submission Time")
+                            if t:
+                                seen.append(int(t))
+                if seen:
+                    print(f"  jobs in the logs span   {_stamp(min(seen))} .. "
+                          f"{_stamp(max(seen))}")
+                print(f"  result windows span     "
+                      f"{_stamp(min(w[0] for w in windows))} .. "
+                      f"{_stamp(max(w[1] for w in windows))}")
+                print("  The two do not overlap. The event logs are from a "
+                      "different run than these results -- wait for delivery of "
+                      "THIS run's log and reparse again.")
     for row in rows:
         row["attribution"] = strategy
 
