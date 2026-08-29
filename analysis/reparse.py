@@ -69,14 +69,27 @@ def main(results_path: str, log_dir: str, out_path: str | None = None) -> None:
                 windows.append((int(span[0]), int(span[1]), group))
     windows.sort()
 
+    # The upper bound of each window is padded, because the driver stops its
+    # timer once the last job is submitted rather than when the log records it.
+    # The padding is clamped to just before the NEXT window opens: without that
+    # clamp a padded window swallows the first job of the following repetition,
+    # which silently merges two repetitions into one and drops the other. That
+    # is not hypothetical -- it cost one repetition of four in testing.
+    padded = []
+    for i, (start, end, group) in enumerate(windows):
+        limit = end + 1000
+        if i + 1 < len(windows):
+            limit = min(limit, windows[i + 1][0] - 1)
+        padded.append((start, max(end, limit), group))
+
     def by_window(props: Dict[str, Any], submitted: int):
-        for start, end, group in windows:
-            # A job submitted inside a repetition belongs to it. The upper bound
-            # is generous by a second because the driver stops its timer after
-            # the last job is submitted, not after the log records it.
-            if start <= submitted <= end + 1000:
-                return group
-        return None  # platform overhead, generation, warmup: not a measurement
+        # Last window that opened at or before this job, so a job can never be
+        # claimed by an earlier repetition than the one it actually ran in.
+        chosen = None
+        for start, end, group in padded:
+            if start <= submitted <= end:
+                chosen = group
+        return chosen  # None: platform overhead or generation, not a measurement
 
     for log in logs:
         by_group.update(parse_event_log(log))
