@@ -120,7 +120,34 @@ TAG_PREFIX = "skewbench:"
 
 
 def _connect_tagging(spark: SparkSession) -> bool:
-    return hasattr(spark, "addTag") and hasattr(spark, "clearTags")
+    """True only when session tags actually WORK, not merely when they exist.
+
+    ``hasattr(spark, "addTag")`` is True on a classic PySpark 3.5 session as
+    well: the method is defined and raises ``RuntimeError: only supported with
+    Spark Connect`` when called. Probing by attribute therefore mis-detects
+    every classic session as Connect and breaks the local single-node runs that
+    the whole study is compared against. Detect by the session's implementation
+    module, which is what actually differs, and cache it so the probe cannot
+    disagree with itself between the set and clear calls of one repetition.
+    """
+    cached = getattr(spark, "_skewbench_connect", None)
+    if cached is None:
+        cached = type(spark).__module__.startswith("pyspark.sql.connect")
+        if not cached and hasattr(spark, "addTag"):
+            # Belt and braces for runtimes that re-export the class elsewhere:
+            # ask the method itself, and believe the exception rather than the
+            # signature.
+            try:
+                spark.addTag("skewbench:probe")
+                spark.clearTags()
+                cached = True
+            except Exception:  # noqa: BLE001
+                cached = False
+        try:
+            setattr(spark, "_skewbench_connect", cached)
+        except Exception:  # noqa: BLE001
+            pass
+    return bool(cached)
 
 
 def _classic_tagging(spark: SparkSession) -> bool:
